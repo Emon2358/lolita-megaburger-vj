@@ -1,34 +1,44 @@
 # random_chroma.py
-# Foreground color-key (make pixels close to a random color transparent) compositor
+# Simple color-key compositor:
+# - Pick a random foreground frame each output frame
+# - Make pixels close to a random target color transparent (replace by background)
+# - No glitches / no extra noise — pure color transparency
+# - Resize background to match foreground size automatically
+#
+# Usage: put video1.mp4 (foreground) and video2.mp4 (background) next to this script and run.
+
 import cv2
 import numpy as np
 import random
-import sys
 import time
 import os
 
-# ========== パラメータ ==========
+# ---------- 設定 ----------
 INPUT_VIDEO_FG = 'video1.mp4'
 INPUT_VIDEO_BG = 'video2.mp4'
 OUTPUT_VIDEO_RAW = 'final_video_raw.mp4'
 
-# カラー透過（チョーク）関連
-TOLERANCE =60            # 色距離の閾値（小さいほど厳密）
-CHANGE_INTERVAL_FRAMES = 20    # カラーターゲットを何フレームごとに切り替えるか（1=毎フレーム）
-TRANSITION_FRAMES = 0            # カラーの補間フレーム数（0=瞬変）
-BLUR_KERNEL = 10     # マスクのぼかしカーネル（奇数推奨）
+# 色透過（チョーク）設定
+TOLERANCE = 80                  # 色距離の閾値。小さくすると厳密に色が合う部分のみ透過
+CHANGE_INTERVAL_FRAMES = 1      # ターゲット色を何フレームごとに切り替えるか（1 = 毎出力フレーム）
+TRANSITION_FRAMES = 0           # 色の補間フレーム数（0 = 瞬変）
+BLUR_KERNEL = 7                 # マスクをぼかすカーネル（奇数推奨。1だとぼかしなし）
 
-# 前景フレーム取り出しのプリロード制御
+# 出力制限（処理フレーム数を減らしたい場合に設定）
+MAX_OUTPUT_SECONDS = 0          # 0 = 無制限。例: 10 で出力を10秒に制限
+OUTPUT_FPS = 0                  # 0 = 元動画の fps を使用。例: 12 にすると出力fpsを下げる
+MAX_OUTPUT_FRAMES = 0           # 0 = 無効。これが >0 の場合、優先してそのフレーム数で終了
+
+# 前景フレームサンプリング（オンザフライ時のI/Oを減らす）
+FG_SAMPLE_POOL_SIZE = 0         # 0 = 無制限（全フレームからランダム）。小さくするとI/O負荷低下（例: 200）
+
+# プリロードしきい値（小さければ全部メモリに読み込む）
 PRELOAD_FRAME_LIMIT = 700
-MAX_PRELOAD_BYTES = 800 * 1024 * 1024  # 800MB 上限目安
-
-# 軽いエフェクト（必要なら調整）
-AGGRESSIVENESS = 0.0             # 0でグリッチ無効、0..1 で軽いチャンネルオフセットが入る
-SALT_PEPPER_PROB = 0.0
+MAX_PRELOAD_BYTES = 800 * 1024 * 1024  # 800MB
 
 FOURCC = cv2.VideoWriter_fourcc(*'mp4v')
+# ----------------------------
 
-# ========== ユーティリティ ==========
 def rand_bgr():
     return np.array([random.randint(0,255), random.randint(0,255), random.randint(0,255)], dtype=np.uint8)
 
@@ -36,27 +46,15 @@ def loop_reset(cap):
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
 def safe_read_frame_at(cap, idx):
-    """cap のフレーム idx を安全に読み出す（シーク + read）"""
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
     return cap.read()
 
-def maybe_apply_light_glitch(img, intensity=0.3):
-    if intensity <= 0: 
-        return img
-    out = img.copy()
-    h, w = out.shape[:2]
-    max_shift = int(6 * intensity)
-    for ch in range(3):
-        dx = random.randint(-max_shift, max_shift)
-        M = np.float32([[1,0,dx],[0,1,0]])
-        out[:,:,ch] = cv2.warpAffine(out[:,:,ch], M, (w,h), borderMode=cv2.BORDER_REFLECT)
-    if SALT_PEPPER_PROB > 0:
-        noise = np.random.rand(h, w)
-        out[noise < (SALT_PEPPER_PROB * intensity)] = 255
-        out[noise > (1 - (SALT_PEPPER_PROB * intensity))] = 0
-    return out
+def ensure_odd(n):
+    n = int(n)
+    if n <= 1:
+        return 1
+    return n if n % 2 == 1 else n+1
 
-# ========== メイン処理 ==========
 def process_video():
     random.seed(time.time() + os.getpid())
 
@@ -70,24 +68,37 @@ def process_video():
         print(f"ERROR: cannot open background '{INPUT_VIDEO_BG}'")
         return
 
-    # 基準サイズは前景ビデオ（既存仕様どおり）
     width = int(cap_fg.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap_fg.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap_fg.get(cv2.CAP_PROP_FPS) or 30.0
-    total_frames = int(cap_fg.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    bg_total_frames = int(cap_bg.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    src_fps = cap_fg.get(cv2.CAP_PROP_FPS) or 30.0
+    total_fg_frames = int(cap_fg.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    total_bg_frames = int(cap_bg.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
-    print(f"FG frames: {total_frames}, BG frames: {bg_total_frames}, {width}x{height} @ {fps}fps")
+    # 出力 fps 決定
+    out_fps = float(OUTPUT_FPS) if OUTPUT_FPS and OUTPUT_FPS > 0 else float(src_fps)
 
-    out = cv2.VideoWriter(OUTPUT_VIDEO_RAW, FOURCC, fps, (width, height))
+    # MAX_OUTPUT_FRAMES の決定
+    if MAX_OUTPUT_FRAMES and MAX_OUTPUT_FRAMES > 0:
+        max_frames = int(MAX_OUTPUT_FRAMES)
+    elif MAX_OUTPUT_SECONDS and MAX_OUTPUT_SECONDS > 0:
+        max_frames = int(max(1, round(MAX_OUTPUT_SECONDS * out_fps)))
+    else:
+        max_frames = None  # 無制限
 
-    # プリロード判定
+    print(f"FG frames: {total_fg_frames}, BG frames: {total_bg_frames}, {width}x{height} @ {src_fps}fps")
+    if max_frames:
+        print(f"Output limited to {max_frames} frames ({out_fps} fps -> ~{max_frames/out_fps:.2f}s)")
+
+    out = cv2.VideoWriter(OUTPUT_VIDEO_RAW, FOURCC, out_fps, (width, height))
+
+    # プリロード判定（小さい前景なら全部読み込む）
     preload = False
-    estimated_bytes = width * height * 3 * max(1, total_frames)
-    if total_frames > 0 and total_frames <= PRELOAD_FRAME_LIMIT and estimated_bytes <= MAX_PRELOAD_BYTES:
+    estimated_bytes = width * height * 3 * max(1, total_fg_frames)
+    if total_fg_frames > 0 and total_fg_frames <= PRELOAD_FRAME_LIMIT and estimated_bytes <= MAX_PRELOAD_BYTES:
         preload = True
 
     fg_frames = []
+    fg_sample_indices = None
     if preload:
         print("プリロード: 前景フレームをメモリに読み込みます...")
         cap_fg.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -96,7 +107,6 @@ def process_video():
             ret, f = cap_fg.read()
             if not ret:
                 break
-            # resize to output size if necessary
             if (f.shape[1], f.shape[0]) != (width, height):
                 f = cv2.resize(f, (width, height))
             fg_frames.append(f)
@@ -104,15 +114,27 @@ def process_video():
         print(f"プリロード完了: {cnt} frames")
         loop_reset(cap_bg)
     else:
-        print("プリロードなし (オンザフライでランダムアクセスします)")
+        # サンプルプールを作る（オンザフライで全フレーム走査しないため）
+        if FG_SAMPLE_POOL_SIZE and FG_SAMPLE_POOL_SIZE > 0 and total_fg_frames > 0:
+            pool_size = min(total_fg_frames, FG_SAMPLE_POOL_SIZE)
+            fg_sample_indices = random.sample(range(total_fg_frames), pool_size)
+            print(f"FG sample pool: {pool_size} indices prepared")
+        else:
+            fg_sample_indices = None
+            print("FG sample pool: none (random from full range)")
 
-    # カラー透過用の初期色
+    # 初期カラーターゲット
     current_color = rand_bgr().astype(np.float32)
     target_color = current_color.copy()
     transition_progress = 1.0
 
     frame_count = 0
     while True:
+        # 終了条件
+        if max_frames is not None and frame_count >= max_frames:
+            print(f"\nReached max output frames ({max_frames}). Stopping.")
+            break
+
         ret_bg, frame_bg = cap_bg.read()
         if not ret_bg:
             loop_reset(cap_bg)
@@ -121,7 +143,7 @@ def process_video():
                 print("背景ビデオの読み込みに失敗しました。")
                 break
 
-        # --- 重要: 背景を基準サイズにリサイズ（ここで必ず合わせる） ---
+        # 背景を出力サイズにリサイズ（必ず合わせる）
         if (frame_bg.shape[1], frame_bg.shape[0]) != (width, height):
             frame_bg = cv2.resize(frame_bg, (width, height))
 
@@ -129,28 +151,30 @@ def process_video():
         sys.stdout.write(f"\rProcessing frame {frame_count}")
         sys.stdout.flush()
 
-        # ランダムに前景フレームを選択
+        # 前景の選択
         if preload:
             if len(fg_frames) == 0:
                 fg_frame = frame_bg.copy()
             else:
                 fg_frame = fg_frames[random.randrange(len(fg_frames))]
         else:
-            if total_frames <= 0:
+            if total_fg_frames <= 0:
                 fg_frame = frame_bg.copy()
             else:
-                idx = random.randrange(total_frames)
+                if fg_sample_indices:
+                    idx = random.choice(fg_sample_indices)
+                else:
+                    idx = random.randrange(total_fg_frames)
                 ret_fg, fg_frame = safe_read_frame_at(cap_fg, idx)
                 if not ret_fg:
-                    # fallback: try reading sequentially
+                    # フォールバック: シーケンシャル read
                     ret_fg2, fg_frame = cap_fg.read()
                     if not ret_fg2:
                         fg_frame = frame_bg.copy()
-            # ensure same size as output
             if (fg_frame.shape[1], fg_frame.shape[0]) != (width, height):
                 fg_frame = cv2.resize(fg_frame, (width, height))
 
-        # ターゲットカラーの切り替え
+        # ターゲットカラーの切り替え（瞬変 or 補間）
         if frame_count % max(1, CHANGE_INTERVAL_FRAMES) == 0:
             target_color = rand_bgr().astype(np.float32)
             transition_progress = 0.0
@@ -163,7 +187,7 @@ def process_video():
             if TRANSITION_FRAMES == 0:
                 current_color = target_color.copy()
 
-        # 色距離に基づくソフトマスク作成（現在のターゲット色に近いほど「透過」＝背景を採用）
+        # マスク作成：色距離に基づくソフトマスク（ターゲット色に近いほど 1 -> 背景を採用）
         f = fg_frame.astype(np.float32)
         c = current_color.reshape((1,1,3)).astype(np.float32)
         diff = f - c
@@ -172,34 +196,16 @@ def process_video():
         mask = 1.0 - (dist / tol)
         mask = np.clip(mask, 0.0, 1.0)
 
-        # マスクをぼかす（カーネルは奇数にする）
-        bk = int(BLUR_KERNEL)
-        if bk % 2 == 0:
-            bk = bk + 1 if bk > 0 else 1
+        # マスクのぼかし（エッジを滑らかに）
+        bk = ensure_odd(BLUR_KERNEL)
         if bk > 1:
             mask = cv2.GaussianBlur(mask, (bk, bk), 0)
 
-        alpha_3 = mask[..., np.newaxis]  # shape (h,w,1) : 1 => background
-
-        # optional light glitch on fg
-        if AGGRESSIVENESS > 0 and random.random() < AGGRESSIVENESS:
-            f = maybe_apply_light_glitch(f.astype(np.uint8), AGGRESSIVENESS).astype(np.float32)
+        alpha_3 = mask[..., np.newaxis]  # shape (h,w,1), 1 => background
 
         bg_f = frame_bg.astype(np.float32)
 
-        # 最後に形状の安全チェック（念のため）
-        if f.shape[:2] != bg_f.shape[:2] or alpha_3.shape[:2] != f.shape[:2]:
-            # ここには通常入らないはず。入った場合は両方リサイズして合わせる。
-            h, w = height, width
-            if f.shape[:2] != (h, w):
-                f = cv2.resize(f.astype(np.uint8), (w, h)).astype(np.float32)
-            if bg_f.shape[:2] != (h, w):
-                bg_f = cv2.resize(bg_f.astype(np.uint8), (w, h)).astype(np.float32)
-            if alpha_3.shape[:2] != (h, w):
-                # alpha を再生成（単一色透過しない最小マスク）
-                alpha_3 = np.zeros((h, w, 1), dtype=np.float32)
-
-        # 合成: mask が 1 のとき背景優先、0 のとき前景優先
+        # 合成（mask=1なら背景、0なら前景）
         final = f * (1.0 - alpha_3) + bg_f * alpha_3
         final = np.clip(final, 0, 255).astype(np.uint8)
 
