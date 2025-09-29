@@ -16,7 +16,7 @@ TOLERANCE = 75
 #    - 1 を設定すると、毎フレーム色が変わるため「最速」になります。
 #    - 10 を設定すると、10フレーム（約0.3秒）は同じ色が使われるため「ゆっくり」になります。
 #    - 小さいほど速く、大きいほど遅くなります。
-CHANGE_INTERVAL_FRAMES = 5
+CHANGE_INTERVAL_FRAMES = 1
 
 # --- 基本設定 ---
 INPUT_VIDEO_FG = 'video1.mp4'
