@@ -21,89 +21,72 @@ def get_video_info(video_path):
     result = run_command(command)
     return json.loads(result.stdout)
 
-# 単色化の関数は削除 (または呼び出さない)
-
-def apply_ultra_glitch(frame, persistence):
+# ★★★ 変更点 1: 引数に other_frame を追加 ★★★
+def apply_ultra_glitch(frame, other_frame, persistence):
     """
     超強力なグリッチエフェクトを適用する
     """
     h, w, _ = frame.shape
-    
-    # フレームのコピーを作成し、直接操作する
     current_frame = frame.copy()
 
-    # 1. 激しいRGBチャンネル操作と空間歪み
-    if np.random.rand() < 0.8: # 高確率で発生
+    # 1. 激しいRGBチャンネル操作
+    if np.random.rand() < 0.8:
         b, g, r = cv2.split(current_frame)
-        
-        # 各チャンネルを個別に激しくずらす
-        shift_r = np.random.randint(-50, 50)
-        shift_g = np.random.randint(-50, 50)
-        shift_b = np.random.randint(-50, 50)
-        
-        r_shifted = np.roll(r, shift_r, axis=1) # 水平シフト
-        g_shifted = np.roll(g, shift_g, axis=0) # 垂直シフト
-        b_shifted = np.roll(b, shift_b, axis=1) # 水平シフト
-        
+        shift_r, shift_g, shift_b = np.random.randint(-50, 50, 3)
+        r_shifted = np.roll(r, shift_r, axis=1)
+        g_shifted = np.roll(g, shift_g, axis=0)
+        b_shifted = np.roll(b, shift_b, axis=1)
         current_frame = cv2.merge([b_shifted, g_shifted, r_shifted])
 
-    # 2. ピクセル単位の破壊とランダムノイズ / ラインスクランブル強化
-    if np.random.rand() < 0.9: # ほぼ常に発生
-        # 全体を高周波ノイズで覆う
+    # 2. ピクセル単位の破壊とラインスクランブル
+    if np.random.rand() < 0.9:
         noise = np.random.randint(0, 255, (h, w, 3), dtype=np.uint8)
         current_frame = cv2.addWeighted(current_frame, 0.7, noise, 0.3, 0)
-        
-        # ランダムなラインスクランブル (行をランダムにずらす)
         if np.random.rand() < 0.7:
-            for _ in range(np.random.randint(1, h // 5)): # 多くの行を対象に
+            for _ in range(np.random.randint(1, h // 5)):
                 row_idx = np.random.randint(0, h)
                 shift_amount = np.random.randint(-w // 2, w // 2)
                 current_frame[row_idx, :] = np.roll(current_frame[row_idx, :], shift_amount, axis=0)
 
-    # 3. よりアグレッシブなデータモッシュ (大きなブロックと高頻度)
+    # 3. データモッシュ風エフェクト
     prev_frame = persistence.get('prev_frame')
-    if prev_frame is not None and np.random.rand() < 0.5: # 50%の確率で発生
-        # ランダムな大きな矩形領域を、前のフレームの内容で上書きする
+    if prev_frame is not None and np.random.rand() < 0.5:
         x, y = np.random.randint(0, w // 4), np.random.randint(0, h // 4)
         rw, rh = np.random.randint(w // 2, w), np.random.randint(h // 2, h)
         current_frame[y:y+rh, x:x+rw] = prev_frame[y:y+rh, x:x+rw]
-    persistence['prev_frame'] = frame.copy() # オリジナルのフレームを次回のデータモッシュ用に保存
+    persistence['prev_frame'] = frame.copy()
 
-    # 4. 完全にランダムなブロックの挿入
-    if np.random.rand() < 0.6: # 60%の確率で発生
+    # ★★★ 変更点 2: 単色ブロックの代わりに、もう一方の映像の一部を上書き ★★★
+    if np.random.rand() < 0.6:
+        # 貼り付けるブロックのサイズと位置をランダムに決定
         block_w, block_h = np.random.randint(w // 10, w // 2), np.random.randint(h // 10, h // 2)
-        block_x, block_y = np.random.randint(0, w - block_w), np.random.randint(0, h - block_h)
-        random_color = (np.random.randint(0, 256), np.random.randint(0, 256), np.random.randint(0, 256))
+        dest_x, dest_y = np.random.randint(0, w - block_w), np.random.randint(0, h - block_h)
         
-        # ランダムな色のブロックで一部を上書き
-        current_frame[block_y:block_y+block_h, block_x:block_x+block_w] = random_color
+        # 別の映像から切り取るソースの位置もランダムに決定
+        source_x, source_y = np.random.randint(0, w - block_w), np.random.randint(0, h - block_h)
+        
+        # other_frame からブロックを切り取り、現在のフレームに貼り付け
+        source_block = other_frame[source_y:source_y+block_h, source_x:source_x+block_w]
+        current_frame[dest_y:dest_y+block_h, dest_x:dest_x+block_w] = source_block
 
-    # 5. よりアグレッシブなフィードバックループ
+    # 5. アグレッシブなフィードバックループ
     feedback_frame = persistence.get('feedback_frame')
-    if feedback_frame is not None and np.random.rand() < 0.9: # 90%の確率で発生
-        # 以前のフィードバック結果をさらに変形させて重ねる
-        scale = np.random.uniform(0.9, 0.99) # 拡大縮小をランダムに
-        angle = np.random.uniform(-5, 5) # わずかな回転を加える
-        
+    if feedback_frame is not None and np.random.rand() < 0.9:
+        scale = np.random.uniform(0.9, 0.99)
+        angle = np.random.uniform(-5, 5)
         M_rot = cv2.getRotationMatrix2D((w/2, h/2), angle, scale)
         feedback_transformed = cv2.warpAffine(feedback_frame, M_rot, (w, h))
-        
-        # 現在のフレームとフィードバック結果を強力にブレンド
         current_frame = cv2.addWeighted(current_frame, 0.6, feedback_transformed, 0.4, 0)
-        
-    persistence['feedback_frame'] = current_frame.copy() # 現在の結果を次回のフィードバックのために保存
+    persistence['feedback_frame'] = current_frame.copy()
     
     return current_frame
 
 def main():
-    if len(sys.argv) != 5:
-        print("使い方: python process_videos.py <基準動画> <重ねる動画> <出力ファイル> <色(R,G,B)>")
+    if len(sys.argv) != 4:
+        print("使い方: python process_videos.py <基準動画> <重ねる動画> <出力ファイル>")
         sys.exit(1)
 
-    base_video_path = sys.argv[1]
-    overlay_video_path = sys.argv[2]
-    output_path = sys.argv[3]
-    # target_color_str = sys.argv[4] # 単色化はしないため、引数は受け取るが使わない
+    base_video_path, overlay_video_path, output_path = sys.argv[1:4]
 
     print("動画情報を取得中...")
     base_info = get_video_info(base_video_path)
@@ -136,8 +119,7 @@ def main():
     
     process = subprocess.Popen(command_encode, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    persistence1 = {} # 各動画ストリーム用に別々のpersistenceを保持
-    persistence2 = {}
+    persistence1, persistence2 = {}, {}
 
     while True:
         ret1, frame1 = cap_base.read()
@@ -145,19 +127,14 @@ def main():
         if not ret1 or not ret2:
             break
         
-        # ★★★ 修正箇所: 単色化を削除し、直接強力なグリッチを適用 ★★★
-        
-        # 基準動画にグリッチを適用
-        frame1_fx = apply_ultra_glitch(frame1, persistence1)
-        
-        # 重ねる動画はリサイズしてからグリッチを適用
+        # 重ねる動画は常に基準動画のサイズに合わせておく
         resized_frame2 = cv2.resize(frame2, (width, height))
-        frame2_fx = apply_ultra_glitch(resized_frame2, persistence2)
+        
+        # ★★★ 変更点 3: apply_ultra_glitch にお互いのフレームを渡す ★★★
+        frame1_fx = apply_ultra_glitch(frame1, resized_frame2, persistence1)
+        frame2_fx = apply_ultra_glitch(resized_frame2, frame1, persistence2)
 
-        # 2つのグリッチ映像を合成 (ブレンド比率を調整してさらに混濁させる)
-        final_frame = cv2.addWeighted(frame1_fx, 0.4, frame2_fx, 0.6, 0) # overlayを強めに
-
-        # ★★★ 修正箇所ここまで ★★★
+        final_frame = cv2.addWeighted(frame1_fx, 0.4, frame2_fx, 0.6, 0)
         
         try:
             process.stdin.write(final_frame.tobytes())
