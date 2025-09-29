@@ -28,27 +28,29 @@ jobs:
       contents: write
 
     steps:
-      # 1. リポジトリのファイルをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Python環境をセットアップ
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+      
+      # FFmpegを確実にインストールするステップ
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      # 3. 必要なライブラリをインストール (★ここが重要★)
+      # 修正されたrequirements.txtを使ってライブラリをインストール
       - name: Install dependencies
         run: |
-          pip install moviepy numpy
+          pip install -r requirements.txt
       
-      # 4. Pythonスクリプトを実行して動画を処理
       - name: Run video processing script
         run: |
           python process_videos.py "${{ github.event.inputs.base_video }}" "${{ github.event.inputs.overlay_video }}" "${{ github.event.inputs.output_file }}" "${{ github.event.inputs.target_color }}"
 
-      # 5. 生成された動画をリポジトリにコミット＆プッシュ
       - name: Commit and push processed video
         run: |
           git config --global user.name 'github-actions[bot]'
