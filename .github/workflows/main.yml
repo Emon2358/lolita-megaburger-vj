@@ -15,10 +15,6 @@ on:
         description: '出力する動画ファイル名'
         required: true
         default: 'processed_video.mp4'
-      target_color:
-        description: '単色化する色 (RGB形式, 例: "255,0,255")'
-        required: true
-        default: '192,192,192' # 銀色
 
 jobs:
   process:
@@ -36,20 +32,19 @@ jobs:
         with:
           python-version: '3.9'
       
-      # FFmpegを確実にインストールするステップ
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # 修正されたrequirements.txtを使ってライブラリをインストール
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install opencv-python-headless numpy
       
+      # ★★★ 修正箇所: 4番目の引数(色の指定)を削除 ★★★
       - name: Run video processing script
         run: |
-          python process_videos.py "${{ github.event.inputs.base_video }}" "${{ github.event.inputs.overlay_video }}" "${{ github.event.inputs.output_file }}" "${{ github.event.inputs.target_color }}"
+          python process_videos.py "${{ github.event.inputs.base_video }}" "${{ github.event.inputs.overlay_video }}" "${{ github.event.inputs.output_file }}"
 
       - name: Commit and push processed video
         run: |
