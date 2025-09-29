@@ -14,16 +14,6 @@ on:
         required: true
         default: '0.3'
         type: string
-      overlay_color:
-        description: 'Overlay Color (hex, e.g., #FF5733 or none)'
-        required: true
-        default: 'none'
-        type: string
-      overlay_strength:
-        description: 'Overlay Strength (0.0 to 1.0)'
-        required: true
-        default: '0.4'
-        type: string
 
 env:
   MP4_VIDEO_NAME: 'final_video.mp4'
@@ -54,14 +44,12 @@ jobs:
         run: |
           pip install opencv-python numpy
 
-      # 4. 入力値を使ってPythonスクリプトを実行
+      # 4. スクリプト実行時の引数を修正
       - name: Run video processing script
         run: |
           python random_chroma.py \
             --tolerance ${{ github.event.inputs.tolerance }} \
-            --afterimage-strength ${{ github.event.inputs.afterimage_strength }} \
-            --overlay-color "${{ github.event.inputs.overlay_color }}" \
-            --overlay-strength ${{ github.event.inputs.overlay_strength }}
+            --afterimage-strength ${{ github.event.inputs.afterimage_strength }}
 
       # 5. ffmpegをインストール
       - name: Install ffmpeg
