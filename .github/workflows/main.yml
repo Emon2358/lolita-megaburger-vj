@@ -1,0 +1,65 @@
+name: Process and Composite Videos
+
+# ワークフローを手動で実行できるようにする (workflow_dispatch)
+on:
+  workflow_dispatch:
+    inputs:
+      base_video:
+        description: '基準にする動画ファイル名 (この動画の長さに合わせる)'
+        required: true
+        default: 'video1.mp4'
+      overlay_video:
+        description: '重ねる動画ファイル名 (速度が変更される)'
+        required: true
+        default: 'video2.mp4'
+      output_file:
+        description: '出力する動画ファイル名'
+        required: true
+        default: 'processed_video.mp4'
+      target_color:
+        description: '単色化する色 (RGB形式, 例: "255,0,255")'
+        required: true
+        default: '255,0,255' # デフォルトはマゼンタ
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    
+    # ワークフローがリポジトリに書き込む権限を設定
+    permissions:
+      contents: write
+
+    steps:
+      # 1. リポジトリのファイルをチェックアウト
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Python環境をセットアップ
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      # 3. 必要なライブラリをインストール
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      # 4. Pythonスクリプトを実行して動画を処理
+      - name: Run video processing script
+        run: |
+          python process_videos.py "${{ github.event.inputs.base_video }}" "${{ github.event.inputs.overlay_video }}" "${{ github.event.inputs.output_file }}" "${{ github.event.inputs.target_color }}"
+
+      # 5. 生成された動画をリポジトリにコミット＆プッシュ
+      - name: Commit and push processed video
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add "${{ github.event.inputs.output_file }}"
+          # コミットが存在する場合のみコミット・プッシュする
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "feat: Add processed video ${{ github.event.inputs.output_file }}" -m "[skip ci]"
+            git push
+          fi
