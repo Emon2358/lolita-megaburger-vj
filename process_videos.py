@@ -4,11 +4,9 @@ import subprocess
 import numpy as np
 import cv2
 import json
-import shutil
 
 def run_command(command):
-    """指定されたコマンドを実行し、エラーがあれば例外を発生させる"""
-    # shell=True を避け、コマンドをリストで渡すように変更
+    """コマンドを実行し、エラーがあれば例外を発生させる"""
     process = subprocess.run(command, capture_output=True, text=True)
     if process.returncode != 0:
         print("Error executing command:", " ".join(command))
@@ -18,37 +16,72 @@ def run_command(command):
     return process
 
 def get_video_info(video_path):
-    """ffprobeを使って動画の情報をJSONで取得する"""
+    """ffprobeを使って動画の情報を取得する"""
     command = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', video_path]
     result = run_command(command)
     return json.loads(result.stdout)
 
 def parse_color(color_str):
-    """'255,0,0' のような文字列を (255, 0, 0) のタプルに変換"""
+    """'R,G,B' 形式の文字列を OpenCV の BGR タプルに変換"""
     try:
         r, g, b = map(int, color_str.split(','))
-        return (b, g, r) # OpenCVはBGR順
+        return (b, g, r)
     except ValueError:
         raise ValueError("色は 'R,G,B' 形式で指定してください (例: '255,0,0')")
 
-def glitch_and_monochrome(frame, target_color_bgr):
-    """フレームを激しく乱し、指定された単色に変換する"""
+def apply_advanced_glitch(frame, persistence):
+    """
+    電気耳/奇怪電波倶楽部風の高度なグリッチエフェクトを適用する
+    """
+    # 1. RGBシフト（色ずれ）
+    if np.random.rand() < 0.2: # 20%の確率で発生
+        b, g, r = cv2.split(frame)
+        shift = np.random.randint(-15, 15)
+        # Gチャンネルを水平にずらす
+        g_shifted = np.roll(g, shift, axis=1)
+        # Bチャンネルを垂直にずらす
+        b_shifted = np.roll(b, shift, axis=0)
+        frame = cv2.merge([b_shifted, g_shifted, r])
+
+    # 2. ブロックディスプレイスメント（既存のグリッチを強化）
+    if np.random.rand() < 0.5: # 50%の確率で発生
+        num_blocks = np.random.randint(15, 80)
+        block_height = frame.shape[0] // num_blocks if num_blocks > 0 else frame.shape[0]
+        for i in range(num_blocks):
+            start = i * block_height
+            end = (i + 1) * block_height
+            shift = np.random.randint(-frame.shape[1] // 4, frame.shape[1] // 4)
+            frame[start:end, :] = np.roll(frame[start:end, :], shift, axis=1)
+
+    # 3. データモッシュ風エフェクト（フレームの持続）
+    prev_frame = persistence.get('prev_frame')
+    if prev_frame is not None and np.random.rand() < 0.3: # 30%の確率で発生
+        # フレームのランダムな矩形領域を、前のフレームの内容で上書きする
+        h, w, _ = frame.shape
+        x, y = np.random.randint(0, w//2), np.random.randint(0, h//2)
+        rw, rh = np.random.randint(w//2, w), np.random.randint(h//2, h)
+        frame[y:y+rh, x:x+rw] = prev_frame[y:y+rh, x:x+rw]
+    persistence['prev_frame'] = frame.copy() # 現在のフレームを次のために保存
+
+    # 4. フィードバックループ
+    feedback_frame = persistence.get('feedback_frame')
+    if feedback_frame is not None and np.random.rand() < 0.8: # 80%の確率で発生
+        # 前のフィードバック結果を少し縮小して中央に配置
+        h, w, _ = frame.shape
+        scale = 0.98
+        M = np.float32([[scale, 0, w*(1-scale)/2], [0, scale, h*(1-scale)/2]])
+        feedback_transformed = cv2.warpAffine(feedback_frame, M, (w, h))
+        # 現在のフレームと前のフィードバック結果をブレンド
+        frame = cv2.addWeighted(frame, 0.8, feedback_transformed, 0.2, 0)
+    persistence['feedback_frame'] = frame.copy() # 現在の結果を次のフィードバックのために保存
+    
+    return frame
+
+def apply_monochrome(frame, target_color_bgr):
+    """フレームを指定された単色に変換する"""
     target_color_np = np.array(target_color_bgr, dtype=np.uint8)
     gray_intensity = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) / 255.0
-    mono_frame = np.einsum('ij,k->ijk', gray_intensity, target_color_np).astype(np.uint8)
-    
-    num_blocks = np.random.randint(15, 50)
-    block_height = frame.shape[0] // num_blocks if num_blocks > 0 else frame.shape[0]
-    processed_frame = mono_frame.copy()
-    for i in range(num_blocks):
-        start = i * block_height
-        end = (i + 1) * block_height
-        shift = np.random.randint(-frame.shape[1] // 3, frame.shape[1] // 3)
-        processed_frame[start:end, :] = np.roll(processed_frame[start:end, :], shift, axis=1)
-    
-    if np.random.rand() < 0.05:
-        np.random.shuffle(processed_frame)
-    return processed_frame
+    return np.einsum('ij,k->ijk', gray_intensity, target_color_np).astype(np.uint8)
 
 def main():
     if len(sys.argv) != 5:
@@ -88,24 +121,18 @@ def main():
     height = int(cap_base.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap_base.get(cv2.CAP_PROP_FPS)
 
-    # ★★★ 修正箇所 ★★★
-    # 1. コーデック名を 'libx24' から 'libx264' に修正
-    # 2. shell=True をやめ、コマンドをリスト形式でPopenに渡すように変更
     command_encode = [
         'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-s', f'{width}x{height}', '-pix_fmt', 'bgr24', '-r', str(fps),
-        '-i', '-',
-        '-i', base_video_path,
-        '-c:v', 'libx264', # <-- 修正点１：タイプミスを修正
-        '-c:a', 'aac',
-        '-map', '0:v:0',
-        '-map', '1:a:0?',
-        '-pix_fmt', 'yuv420p',
-        output_path
+        '-i', '-', '-i', base_video_path, '-c:v', 'libx264', '-c:a', 'aac',
+        '-map', '0:v:0', '-map', '1:a:0?', '-pix_fmt', 'yuv420p', output_path
     ]
     
-    # <-- 修正点２：より安全なコマンド実行方法に変更
     process = subprocess.Popen(command_encode, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    # フレーム間で情報を保持するための辞書
+    persistence1 = {}
+    persistence2 = {}
 
     while True:
         ret1, frame1 = cap_base.read()
@@ -113,18 +140,23 @@ def main():
         if not ret1 or not ret2:
             break
         
-        frame1_fx = glitch_and_monochrome(frame1, target_color_bgr)
-        frame2_fx = glitch_and_monochrome(frame2, target_color_bgr)
-        resized_frame2_fx = cv2.resize(frame2_fx, (width, height))
-        final_frame = cv2.addWeighted(frame1_fx, 0.5, resized_frame2_fx, 0.5, 0)
+        # 高度なグリッチエフェクトを適用
+        frame1_fx = apply_advanced_glitch(frame1, persistence1)
+        
+        # 重ねる動画はリサイズしてからエフェクト適用
+        resized_frame2 = cv2.resize(frame2, (width, height))
+        frame2_fx = apply_advanced_glitch(resized_frame2, persistence2)
+
+        # 2つのグリッチ映像をブレンド
+        blended_frame = cv2.addWeighted(frame1_fx, 0.5, frame2_fx, 0.5, 0)
+        
+        # 最終的に全体を単色化
+        final_frame = apply_monochrome(blended_frame, target_color_bgr)
         
         try:
             process.stdin.write(final_frame.tobytes())
-        except BrokenPipeError:
-            print("FFmpegプロセスが予期せず終了しました。コマンド引数を確認してください。")
-            break # パイプが壊れたらループを抜ける
-        except Exception as e:
-            print(f"フレームの書き込み中にエラーが発生しました: {e}")
+        except (BrokenPipeError, IOError):
+            print("FFmpegプロセスが予期せず終了しました。")
             break
 
     print("後処理を実行中...")
