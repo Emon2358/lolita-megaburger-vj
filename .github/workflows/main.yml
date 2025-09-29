@@ -1,29 +1,24 @@
-# .github/workflows/full_video_workflow.yml
-name: Full Video Processing & Upload Workflow
+# .github/workflows/video_process_upload.yml
+name: Video Processing & Upload Workflow
 
 on:
   workflow_dispatch: # 手動実行を許可
 
 env:
-  # ★変更点: 完成した動画をプッシュするブランチを 'main' に設定
-  TARGET_BRANCH: 'main' 
-  
-  # 最終的な動画のファイル名
-  FINAL_VIDEO_NAME: 'final_datamoshed_video.mp4'
+  # Pythonスクリプトが出力する最終的な動画のファイル名
+  FINAL_VIDEO_NAME: 'final_video.mp4'
 
 jobs:
   process_and_upload:
     runs-on: ubuntu-latest
     
-    # リポジトリへの書き込み権限を付与
     permissions:
       contents: write 
 
     steps:
-      # 1. 現在のブランチ（main）のコンテンツをチェックアウト
+      # 1. リポジトリをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
-        # GITHUB_TOKEN を使用してチェックアウトすることで、後でプッシュできるようになります
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -33,43 +28,30 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 3. 必要なライブラリとツールをインストール
-      - name: Install dependencies
+      # 3. ★変更点: 必要なライブラリをインストール (datamosh-pyを削除)
+      - name: Install Python dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          pip install opencv-python numpy datamosh-py
+          pip install opencv-python numpy
 
-      # 4. random_chroma.py を実行して動画を合成
-      - name: Run random chromakey script
+      # 4. random_chroma.py を実行して動画を処理
+      - name: Run video processing script
         run: python random_chroma.py
 
-      # 5. データモッシュを適用
-      - name: Apply datamosh
-        run: |
-          datamosh composited_video.mp4 -o ${{ env.FINAL_VIDEO_NAME }} --effect classic
+      # 5. ★変更点: データモッシュのステップを削除
 
       # 6. 完成した動画を main ブランチにコミット & プッシュ
       - name: Commit and push final video
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # ワークスペースを最新の状態に保つ
           git pull
-          
-          # 新しい動画ファイルを追加
           git add ${{ env.FINAL_VIDEO_NAME }}
-          
-          # 変更があればコミット、なければ何もしない
-          git commit -m "Add/Update final datamoshed video (workflow run ${{ github.run_id }})" || echo "No changes to commit"
-          
-          # main ブランチにプッシュ
+          git commit -m "Add/Update final video (workflow run ${{ github.run_id }})" || echo "No changes to commit"
           git push
 
       # 7. (オプション) アーティファクトとしてもアップロード
       - name: Upload final video as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: final-datamoshed-video
+          name: final-video
           path: ${{ env.FINAL_VIDEO_NAME }}
