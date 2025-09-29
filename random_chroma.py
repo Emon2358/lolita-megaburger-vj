@@ -2,47 +2,22 @@ import cv2
 import numpy as np
 import random
 import sys
-import argparse
+import argparse # コマンドライン引数を扱うために追加
 
 # --- 設定項目 ---
 INPUT_VIDEO_FG = 'video1.mp4'
 INPUT_VIDEO_BG = 'video2.mp4'
+# ★変更点: Pythonスクリプト側では中間ファイルとしてmp4を出力
 OUTPUT_VIDEO = 'final_video.mp4'
 # --- 設定はここまで ---
 
-def apply_color_effect(frame, effect):
-    """
-    指定されたカラーエフェクトをフレームに適用します。
-    Args:
-        frame (numpy.ndarray): 入力フレーム
-        effect (str): 'none', 'bright', 'warm', 'cool' のいずれか
-    Returns:
-        numpy.ndarray: エフェクト適用後のフレーム
-    """
-    if effect == 'none':
-        return frame
+# ★追加: 16進数カラーコードをBGRタプルに変換する関数
+def hex_to_bgr(hex_color):
+    """ #RRGGBB 形式の16進数カラーコードを (B, G, R) タプルに変換する """
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16) for i in (4, 2, 0))
 
-    # オーバーフローを防ぐためにfloat32に変換して計算
-    frame = frame.astype(np.float32)
-
-    if effect == 'bright':
-        # 明るさを50増加させる
-        frame = np.clip(frame + 50, 0, 255)
-    elif effect == 'warm':
-        # 暖色系: 赤チャンネルを強調し、青チャンネルを弱める
-        frame[:, :, 2] = np.clip(frame[:, :, 2] * 1.2, 0, 255)  # BGRのRチャンネル
-        frame[:, :, 0] = np.clip(frame[:, :, 0] * 0.8, 0, 255)  # BGRのBチャンネル
-    elif effect == 'cool':
-        # 寒色系: 青チャンネルを強調し、赤チャンネルを弱める
-        frame[:, :, 0] = np.clip(frame[:, :, 0] * 1.2, 0, 255)  # BGRのBチャンネル
-        frame[:, :, 2] = np.clip(frame[:, :, 2] * 0.8, 0, 255)  # BGRのRチャンネル
-
-    return frame.astype(np.uint8)
-
-def process_video(tolerance, color_effect, afterimage_strength):
-    """
-    動画を処理し、ランダムクロマキー、カラーエフェクト、残像効果を適用します。
-    """
+def process_video(args):
     cap_fg = cv2.VideoCapture(INPUT_VIDEO_FG)
     cap_bg = cv2.VideoCapture(INPUT_VIDEO_BG)
 
@@ -62,11 +37,10 @@ def process_video(tolerance, color_effect, afterimage_strength):
     out = cv2.VideoWriter(OUTPUT_VIDEO, fourcc, fps, (width, height))
 
     print("動画処理を開始します...")
-    print(f"設定値: Tolerance={tolerance}, Color Effect='{color_effect}', Afterimage Strength={afterimage_strength}")
     
+    # ★変更点: 残像効果のための前のフレームを保持する変数を初期化
+    prev_frame = None
     frame_count = 0
-    prev_frame = None  # ★追加: 前のフレームを保存する変数
-
     while True:
         ret_fg, frame_fg = cap_fg.read()
         ret_bg, frame_bg = cap_bg.read()
@@ -81,30 +55,38 @@ def process_video(tolerance, color_effect, afterimage_strength):
         frame_bg_resized = cv2.resize(frame_bg, (width, height))
         random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
         
-        lower_bound = np.clip(random_color_bgr - tolerance, 0, 255)
-        upper_bound = np.clip(random_color_bgr + tolerance, 0, 255)
-
+        # クロマキー処理
+        lower_bound = np.clip(random_color_bgr - args.tolerance, 0, 255)
+        upper_bound = np.clip(random_color_bgr + args.tolerance, 0, 255)
         mask = cv2.inRange(frame_fg, lower_bound, upper_bound)
         mask_inv = cv2.bitwise_not(mask)
-
         fg_masked = cv2.bitwise_and(frame_fg, frame_fg, mask=mask_inv)
         bg_masked = cv2.bitwise_and(frame_bg_resized, frame_bg_resized, mask=mask)
-        final_frame = cv2.add(fg_masked, bg_masked)
+        chroma_frame = cv2.add(fg_masked, bg_masked)
+
+        # ★変更点: 残像効果のロジックを修正
+        if prev_frame is None:
+            # 最初のフレームはそのまま保持
+            prev_frame = chroma_frame.copy()
         
-        # ★変更点: 残像効果を適用
-        if afterimage_strength > 0 and prev_frame is not None:
-            # 現在のフレームと前のフレームをブレンド
-            processed_frame = cv2.addWeighted(
-                final_frame, 1.0 - afterimage_strength, prev_frame, afterimage_strength, 0
-            )
-        else:
-            processed_frame = final_frame
+        # 現在のフレームと前のフレームをブレンドして残像を作成
+        afterimage_frame = cv2.addWeighted(chroma_frame, 1.0 - args.afterimage_strength, prev_frame, args.afterimage_strength, 0)
+        # 次のループのために現在のフレームを保持
+        prev_frame = afterimage_frame.copy()
 
-        # 次のループのために、色補正前のフレームを保存
-        prev_frame = final_frame.copy()
+        output_frame = afterimage_frame
 
-        # ★変更点: カラーエフェクトを適用
-        output_frame = apply_color_effect(processed_frame, color_effect)
+        # ★変更点: 単色オーバーレイ機能
+        if args.overlay_color != 'none':
+            try:
+                bgr_color = hex_to_bgr(args.overlay_color)
+                # フレームと同じサイズの単色レイヤーを作成
+                color_layer = np.full((height, width, 3), bgr_color, dtype=np.uint8)
+                # 残像フレームと単色レイヤーをブレンド
+                output_frame = cv2.addWeighted(output_frame, 1.0 - args.overlay_strength, color_layer, args.overlay_strength, 0)
+            except Exception as e:
+                print(f"\n無効なカラーコードです: {args.overlay_color} エラー: {e}")
+
 
         out.write(output_frame)
 
@@ -116,15 +98,12 @@ def process_video(tolerance, color_effect, afterimage_strength):
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    # ★追加: コマンドライン引数を解析
-    parser = argparse.ArgumentParser(description='Process video with random chroma key and effects.')
-    parser.add_argument('--tolerance', type=int, default=50, help='Color tolerance for chroma keying.')
-    parser.add_argument('--color-effect', type=str, default='none', choices=['none', 'bright', 'warm', 'cool'], help='Color effect to apply.')
-    parser.add_argument('--afterimage-strength', type=float, default=0.0, help='Strength of the afterimage effect (0.0 to 1.0).')
+    # ★変更点: コマンドライン引数の設定を全面的に更新
+    parser = argparse.ArgumentParser(description='動画にクロマキー、残像、カラーオーバーレイ効果を適用します。')
+    parser.add_argument('--tolerance', type=int, default=50, help='クロマキーの色の許容度 (0-255)')
+    parser.add_argument('--afterimage-strength', type=float, default=0.3, help='残像の強さ (0.0 - 1.0)')
+    parser.add_argument('--overlay-color', type=str, default='none', help='オーバーレイする単色 (#RRGGBB形式、または "none")')
+    parser.add_argument('--overlay-strength', type=float, default=0.4, help='単色オーバーレイの強さ (0.0 - 1.0)')
     
     args = parser.parse_args()
-
-    # afterimage-strengthの値を0.0から1.0の間に制限
-    afterimage_strength_clamped = max(0.0, min(1.0, args.afterimage_strength))
-
-    process_video(args.tolerance, args.color_effect, afterimage_strength_clamped)
+    process_video(args)
