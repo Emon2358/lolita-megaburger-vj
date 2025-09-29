@@ -20,25 +20,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # 3. 動画処理を実行（PI定数をacos(-1)に置換）
-      - name: Process videos with FFmpeg
+      # 3. 複雑なフィルタ記述をスクリプトファイルに書き出す
+      - name: Create filter_complex script
         run: |
-          ffmpeg -i video2.mp4 -i video1.mp4 -filter_complex \
-          "[1:v]format=rgba, \
-          geq=r=r(X\\,Y):g=g(X\\,Y):b=b(X\\,Y):a='if( \
-          lt( \
-            sqrt( \
-              pow(r(X\\,Y)-(128+127*sin(2*acos(-1)*t/10))\\,2) + \
-              pow(g(X\\,Y)-(128+127*sin(2*acos(-1)*t/10+2*acos(-1)/3))\\,2) + \
-              pow(b(X\\,Y)-(128+127*sin(2*acos(-1)*t/10+4*acos(-1)/3))\\,2) \
-            )\\, 60 \
-          )\\, 0\\, 255 \
-          )'[fg]; \
-          [0:v][fg]overlay[merged]; \
-          [merged]tblend=all_mode=difference,framerate=15,format=yuv420p" \
-          -c:a copy output.mp4
+          cat <<'EOF' > filter_script.txt
+          [1:v]format=rgba,
+          geq=r=r(X\,Y):g=g(X\,Y):b=b(X\,Y):a='if(
+            lt(
+              sqrt(
+                pow(r(X\,Y)-(128+127*sin(2*acos(-1)*t/10))\,2) +
+                pow(g(X\,Y)-(128+127*sin(2*acos(-1)*t/10+2*acos(-1)/3))\,2) +
+                pow(b(X\,Y)-(128+127*sin(2*acos(-1)*t/10+4*acos(-1)/3))\,2)
+              )\, 60
+            )\, 0\, 255
+          )'[fg];
+          [0:v][fg]overlay[merged];
+          [merged]tblend=all_mode=difference,framerate=15,format=yuv420p
+          EOF
+
+      # 4. スクリプトファイルを使って動画処理を実行
+      - name: Process videos with FFmpeg using script
+        run: |
+          ffmpeg -i video2.mp4 -i video1.mp4 -filter_complex_script filter_script.txt -c:a copy output.mp4
           
-      # 4. 処理した動画をリポジトリにプッシュ
+      # 5. 処理した動画をリポジトリにプッシュ
       - name: Commit and push processed video
         run: |
           git config --global user.name 'github-actions[bot]'
