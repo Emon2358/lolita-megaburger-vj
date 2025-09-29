@@ -21,56 +21,79 @@ def get_video_info(video_path):
     result = run_command(command)
     return json.loads(result.stdout)
 
-def parse_color(color_str):
-    """'R,G,B' 形式の文字列を OpenCV の BGR タプルに変換"""
-    try:
-        r, g, b = map(int, color_str.split(','))
-        return (b, g, r)
-    except ValueError:
-        raise ValueError("色は 'R,G,B' 形式で指定してください (例: '255,0,0')")
+# 単色化の関数は削除 (または呼び出さない)
 
-def apply_advanced_glitch(frame, persistence):
-    """電気耳/奇怪電波倶楽部風の高度なグリッチエフェクトを適用する"""
-    if np.random.rand() < 0.2:
-        b, g, r = cv2.split(frame)
-        shift = np.random.randint(-15, 15)
-        g_shifted = np.roll(g, shift, axis=1)
-        b_shifted = np.roll(b, shift, axis=0)
-        frame = cv2.merge([b_shifted, g_shifted, r])
-
-    if np.random.rand() < 0.5:
-        num_blocks = np.random.randint(15, 80)
-        block_height = frame.shape[0] // num_blocks if num_blocks > 0 else frame.shape[0]
-        for i in range(num_blocks):
-            start = i * block_height
-            end = (i + 1) * block_height
-            shift = np.random.randint(-frame.shape[1] // 4, frame.shape[1] // 4)
-            frame[start:end, :] = np.roll(frame[start:end, :], shift, axis=1)
-
-    prev_frame = persistence.get('prev_frame')
-    if prev_frame is not None and np.random.rand() < 0.3:
-        h, w, _ = frame.shape
-        x, y = np.random.randint(0, w//2), np.random.randint(0, h//2)
-        rw, rh = np.random.randint(w//2, w), np.random.randint(h//2, h)
-        frame[y:y+rh, x:x+rw] = prev_frame[y:y+rh, x:x+rw]
-    persistence['prev_frame'] = frame.copy()
-
-    feedback_frame = persistence.get('feedback_frame')
-    if feedback_frame is not None and np.random.rand() < 0.8:
-        h, w, _ = frame.shape
-        scale = 0.98
-        M = np.float32([[scale, 0, w*(1-scale)/2], [0, scale, h*(1-scale)/2]])
-        feedback_transformed = cv2.warpAffine(feedback_frame, M, (w, h))
-        frame = cv2.addWeighted(frame, 0.8, feedback_transformed, 0.2, 0)
-    persistence['feedback_frame'] = frame.copy()
+def apply_ultra_glitch(frame, persistence):
+    """
+    超強力なグリッチエフェクトを適用する
+    """
+    h, w, _ = frame.shape
     
-    return frame
+    # フレームのコピーを作成し、直接操作する
+    current_frame = frame.copy()
 
-def apply_monochrome(frame, target_color_bgr):
-    """フレームを指定された単色に変換する"""
-    target_color_np = np.array(target_color_bgr, dtype=np.uint8)
-    gray_intensity = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) / 255.0
-    return np.einsum('ij,k->ijk', gray_intensity, target_color_np).astype(np.uint8)
+    # 1. 激しいRGBチャンネル操作と空間歪み
+    if np.random.rand() < 0.8: # 高確率で発生
+        b, g, r = cv2.split(current_frame)
+        
+        # 各チャンネルを個別に激しくずらす
+        shift_r = np.random.randint(-50, 50)
+        shift_g = np.random.randint(-50, 50)
+        shift_b = np.random.randint(-50, 50)
+        
+        r_shifted = np.roll(r, shift_r, axis=1) # 水平シフト
+        g_shifted = np.roll(g, shift_g, axis=0) # 垂直シフト
+        b_shifted = np.roll(b, shift_b, axis=1) # 水平シフト
+        
+        current_frame = cv2.merge([b_shifted, g_shifted, r_shifted])
+
+    # 2. ピクセル単位の破壊とランダムノイズ / ラインスクランブル強化
+    if np.random.rand() < 0.9: # ほぼ常に発生
+        # 全体を高周波ノイズで覆う
+        noise = np.random.randint(0, 255, (h, w, 3), dtype=np.uint8)
+        current_frame = cv2.addWeighted(current_frame, 0.7, noise, 0.3, 0)
+        
+        # ランダムなラインスクランブル (行をランダムにずらす)
+        if np.random.rand() < 0.7:
+            for _ in range(np.random.randint(1, h // 5)): # 多くの行を対象に
+                row_idx = np.random.randint(0, h)
+                shift_amount = np.random.randint(-w // 2, w // 2)
+                current_frame[row_idx, :] = np.roll(current_frame[row_idx, :], shift_amount, axis=0)
+
+    # 3. よりアグレッシブなデータモッシュ (大きなブロックと高頻度)
+    prev_frame = persistence.get('prev_frame')
+    if prev_frame is not None and np.random.rand() < 0.5: # 50%の確率で発生
+        # ランダムな大きな矩形領域を、前のフレームの内容で上書きする
+        x, y = np.random.randint(0, w // 4), np.random.randint(0, h // 4)
+        rw, rh = np.random.randint(w // 2, w), np.random.randint(h // 2, h)
+        current_frame[y:y+rh, x:x+rw] = prev_frame[y:y+rh, x:x+rw]
+    persistence['prev_frame'] = frame.copy() # オリジナルのフレームを次回のデータモッシュ用に保存
+
+    # 4. 完全にランダムなブロックの挿入
+    if np.random.rand() < 0.6: # 60%の確率で発生
+        block_w, block_h = np.random.randint(w // 10, w // 2), np.random.randint(h // 10, h // 2)
+        block_x, block_y = np.random.randint(0, w - block_w), np.random.randint(0, h - block_h)
+        random_color = (np.random.randint(0, 256), np.random.randint(0, 256), np.random.randint(0, 256))
+        
+        # ランダムな色のブロックで一部を上書き
+        current_frame[block_y:block_y+block_h, block_x:block_x+block_w] = random_color
+
+    # 5. よりアグレッシブなフィードバックループ
+    feedback_frame = persistence.get('feedback_frame')
+    if feedback_frame is not None and np.random.rand() < 0.9: # 90%の確率で発生
+        # 以前のフィードバック結果をさらに変形させて重ねる
+        scale = np.random.uniform(0.9, 0.99) # 拡大縮小をランダムに
+        angle = np.random.uniform(-5, 5) # わずかな回転を加える
+        
+        M_rot = cv2.getRotationMatrix2D((w/2, h/2), angle, scale)
+        feedback_transformed = cv2.warpAffine(feedback_frame, M_rot, (w, h))
+        
+        # 現在のフレームとフィードバック結果を強力にブレンド
+        current_frame = cv2.addWeighted(current_frame, 0.6, feedback_transformed, 0.4, 0)
+        
+    persistence['feedback_frame'] = current_frame.copy() # 現在の結果を次回のフィードバックのために保存
+    
+    return current_frame
 
 def main():
     if len(sys.argv) != 5:
@@ -80,10 +103,8 @@ def main():
     base_video_path = sys.argv[1]
     overlay_video_path = sys.argv[2]
     output_path = sys.argv[3]
-    color_str = sys.argv[4]
+    # target_color_str = sys.argv[4] # 単色化はしないため、引数は受け取るが使わない
 
-    target_color_bgr = parse_color(color_str)
-    
     print("動画情報を取得中...")
     base_info = get_video_info(base_video_path)
     overlay_info = get_video_info(overlay_video_path)
@@ -106,18 +127,17 @@ def main():
     height = int(cap_base.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap_base.get(cv2.CAP_PROP_FPS)
 
-    # ★★★ 修正箇所 ★★★
-    # ピクセルフォーマットの指定 'yuv4p' を 'yuv420p' に修正
     command_encode = [
         'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-s', f'{width}x{height}',
         '-pix_fmt', 'bgr24', '-r', str(fps), '-i', '-', '-i', base_video_path,
         '-c:v', 'libx264', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0?',
-        '-pix_fmt', 'yuv420p', # <-- タイプミスを修正
-        output_path
+        '-pix_fmt', 'yuv420p', output_path
     ]
     
     process = subprocess.Popen(command_encode, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    persistence1, persistence2 = {}, {}
+    
+    persistence1 = {} # 各動画ストリーム用に別々のpersistenceを保持
+    persistence2 = {}
 
     while True:
         ret1, frame1 = cap_base.read()
@@ -125,13 +145,19 @@ def main():
         if not ret1 or not ret2:
             break
         
-        mono_frame1 = apply_monochrome(frame1, target_color_bgr)
+        # ★★★ 修正箇所: 単色化を削除し、直接強力なグリッチを適用 ★★★
+        
+        # 基準動画にグリッチを適用
+        frame1_fx = apply_ultra_glitch(frame1, persistence1)
+        
+        # 重ねる動画はリサイズしてからグリッチを適用
         resized_frame2 = cv2.resize(frame2, (width, height))
-        mono_frame2 = apply_monochrome(resized_frame2, target_color_bgr)
+        frame2_fx = apply_ultra_glitch(resized_frame2, persistence2)
 
-        frame1_fx = apply_advanced_glitch(mono_frame1, persistence1)
-        frame2_fx = apply_advanced_glitch(mono_frame2, persistence2)
-        final_frame = cv2.addWeighted(frame1_fx, 0.5, frame2_fx, 0.5, 0)
+        # 2つのグリッチ映像を合成 (ブレンド比率を調整してさらに混濁させる)
+        final_frame = cv2.addWeighted(frame1_fx, 0.4, frame2_fx, 0.6, 0) # overlayを強めに
+
+        # ★★★ 修正箇所ここまで ★★★
         
         try:
             process.stdin.write(final_frame.tobytes())
