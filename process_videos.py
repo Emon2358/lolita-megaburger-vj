@@ -37,9 +37,7 @@ def apply_advanced_glitch(frame, persistence):
     if np.random.rand() < 0.2: # 20%の確率で発生
         b, g, r = cv2.split(frame)
         shift = np.random.randint(-15, 15)
-        # Gチャンネルを水平にずらす
         g_shifted = np.roll(g, shift, axis=1)
-        # Bチャンネルを垂直にずらす
         b_shifted = np.roll(b, shift, axis=0)
         frame = cv2.merge([b_shifted, g_shifted, r])
 
@@ -56,24 +54,21 @@ def apply_advanced_glitch(frame, persistence):
     # 3. データモッシュ風エフェクト（フレームの持続）
     prev_frame = persistence.get('prev_frame')
     if prev_frame is not None and np.random.rand() < 0.3: # 30%の確率で発生
-        # フレームのランダムな矩形領域を、前のフレームの内容で上書きする
         h, w, _ = frame.shape
         x, y = np.random.randint(0, w//2), np.random.randint(0, h//2)
         rw, rh = np.random.randint(w//2, w), np.random.randint(h//2, h)
         frame[y:y+rh, x:x+rw] = prev_frame[y:y+rh, x:x+rw]
-    persistence['prev_frame'] = frame.copy() # 現在のフレームを次のために保存
+    persistence['prev_frame'] = frame.copy()
 
     # 4. フィードバックループ
     feedback_frame = persistence.get('feedback_frame')
     if feedback_frame is not None and np.random.rand() < 0.8: # 80%の確率で発生
-        # 前のフィードバック結果を少し縮小して中央に配置
         h, w, _ = frame.shape
         scale = 0.98
         M = np.float32([[scale, 0, w*(1-scale)/2], [0, scale, h*(1-scale)/2]])
         feedback_transformed = cv2.warpAffine(feedback_frame, M, (w, h))
-        # 現在のフレームと前のフィードバック結果をブレンド
         frame = cv2.addWeighted(frame, 0.8, feedback_transformed, 0.2, 0)
-    persistence['feedback_frame'] = frame.copy() # 現在の結果を次のフィードバックのために保存
+    persistence['feedback_frame'] = frame.copy()
     
     return frame
 
@@ -125,12 +120,11 @@ def main():
         'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-s', f'{width}x{height}', '-pix_fmt', 'bgr24', '-r', str(fps),
         '-i', '-', '-i', base_video_path, '-c:v', 'libx264', '-c:a', 'aac',
-        '-map', '0:v:0', '-map', '1:a:0?', '-pix_fmt', 'yuv420p', output_path
+        '-map', '0:v:0', '-map', '1:a:0?', '-pix_fmt', 'yuv4p', output_path
     ]
     
     process = subprocess.Popen(command_encode, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    # フレーム間で情報を保持するための辞書
     persistence1 = {}
     persistence2 = {}
 
@@ -140,19 +134,24 @@ def main():
         if not ret1 or not ret2:
             break
         
-        # 高度なグリッチエフェクトを適用
-        frame1_fx = apply_advanced_glitch(frame1, persistence1)
+        # ★★★ 修正箇所: ここからロジックを変更 ★★★
         
-        # 重ねる動画はリサイズしてからエフェクト適用
+        # 1. 最初に各フレームを単色化する
+        mono_frame1 = apply_monochrome(frame1, target_color_bgr)
+        
         resized_frame2 = cv2.resize(frame2, (width, height))
-        frame2_fx = apply_advanced_glitch(resized_frame2, persistence2)
+        mono_frame2 = apply_monochrome(resized_frame2, target_color_bgr)
 
-        # 2つのグリッチ映像をブレンド
-        blended_frame = cv2.addWeighted(frame1_fx, 0.5, frame2_fx, 0.5, 0)
+        # 2. 単色化したフレームに対して、高度なグリッチを適用する
+        #    これにより、色ずれなどが新たな色として現れる
+        frame1_fx = apply_advanced_glitch(mono_frame1, persistence1)
+        frame2_fx = apply_advanced_glitch(mono_frame2, persistence2)
+
+        # 3. エフェクト適用済みの2つのフレームを合成する
+        final_frame = cv2.addWeighted(frame1_fx, 0.5, frame2_fx, 0.5, 0)
         
-        # 最終的に全体を単色化
-        final_frame = apply_monochrome(blended_frame, target_color_bgr)
-        
+        # ★★★ 修正箇所: ここまで ★★★
+
         try:
             process.stdin.write(final_frame.tobytes())
         except (BrokenPipeError, IOError):
