@@ -1,10 +1,13 @@
+# .github/workflows/video_process_upload.yml
 name: Video Processing & Upload Workflow
 
 on:
   workflow_dispatch:
 
 env:
-  FINAL_VIDEO_NAME: 'final_video.mp4'
+  FINAL_VIDEO_NAME: 'final_video_100mb.mp4'
+  RAW_VIDEO_NAME: 'final_video_raw.mp4'
+  TARGET_BYTES: 100000000  # 100,000,000 bytes（約95.4 MiB）。必要に応じて 104857600 に変更
 
 jobs:
   process_and_upload:
@@ -34,25 +37,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install opencv-python-headless numpy
 
-      - name: Show inputs
-        run: |
-          echo "Listing working directory"
-          ls -la
+      - name: List files (debug)
+        run: ls -la
 
       - name: Run video processing script
-        run: |
-          python random_chroma.py
+        run: python random_chroma.py
 
-      - name: Show result info
+      - name: Re-encode to ~100MB target (two-pass using ffmpeg)
         run: |
-          if [ -f "${{ env.FINAL_VIDEO_NAME }}" ]; then
-            echo "Output file:"
-            ls -lh "${{ env.FINAL_VIDEO_NAME }}"
-            md5sum "${{ env.FINAL_VIDEO_NAME }}" || true
-          else
-            echo "No output file found"
+          RAW="${{ env.RAW_VIDEO_NAME }}"
+          TARGET="${{ env.FINAL_VIDEO_NAME }}"
+          TARGET_BYTES=${{ env.TARGET_BYTES }}
+          AUDIO_BITRATE=128000
+
+          if [ ! -f "$RAW" ]; then
+            echo "Raw video '$RAW' not found!"
+            ls -la
             exit 1
           fi
+
+          DURATION=$(ffprobe -v error -select_streams v:0 -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$RAW")
+          if [ -z "$DURATION" ]; then
+            echo "ffprobe failed to get duration"
+            exit 1
+          fi
+
+          # compute video bitrate in bits per second
+          VID_BITRATE=$(awk -v t=$TARGET_BYTES -v d=$DURATION -v a=$AUDIO_BITRATE 'BEGIN{b=int((t*8)/d - a); if(b<1000) b=1000; print b}')
+          echo "Duration: $DURATION s, target video bitrate: $VID_BITRATE bps"
+
+          # Optional: scale down for more margin (uncomment to enable)
+          # SCALE="-vf scale=1280:-2"
+          SCALE=""
+
+          # Two-pass encode
+          ffmpeg -y -i "$RAW" -c:v libx264 -b:v ${VID_BITRATE} -pass 1 -an -f mp4 /dev/null
+          ffmpeg -y -i "$RAW" -c:v libx264 -b:v ${VID_BITRATE} -pass 2 -c:a aac -b:a 128k $SCALE "$TARGET"
+
+          echo "Re-encode finished. Result:"
+          ls -lh "$TARGET" || true
+          md5sum "$TARGET" || true
 
       - name: Commit and push final video
         run: |
