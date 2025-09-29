@@ -1,15 +1,27 @@
-# random_chroma.py
 import cv2
 import numpy as np
 import random
 import sys
 
-# --- 設定項目 ---
+# --- 💡 設定項目 ---
+# これらの値を変更して効果を調整してください
+
+# 1. 範囲 (TOLERANCE)
+#    透過させる色の類似度。値を大きくするほど、より広い範囲の色が一気に透過します。
+#    推奨値: 30 (控えめ) ~ 100 (大胆)
+TOLERANCE = 60
+
+# 2. 頻度・速度 (CHANGE_INTERVAL_FRAMES)
+#    何フレームごとに透過する色をランダムに変えるか。
+#    - 1 を設定すると、毎フレーム色が変わるため「最速」になります。
+#    - 10 を設定すると、10フレーム（約0.3秒）は同じ色が使われるため「ゆっくり」になります。
+#    - 小さいほど速く、大きいほど遅くなります。
+CHANGE_INTERVAL_FRAMES = 5
+
+# --- 基本設定 ---
 INPUT_VIDEO_FG = 'video1.mp4'
 INPUT_VIDEO_BG = 'video2.mp4'
-# ★変更点: 出力ファイル名を最終成果物の名前に変更
-OUTPUT_VIDEO = 'final_video.mp4' 
-TOLERANCE = 30 
+OUTPUT_VIDEO = 'final_video.mp4' # GitHub Actionsのファイル名と合わせています
 # --- 設定はここまで ---
 
 def process_video():
@@ -34,6 +46,9 @@ def process_video():
     print("動画処理を開始します...")
     
     frame_count = 0
+    # 最初にランダムな色を生成
+    random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
+
     while True:
         ret_fg, frame_fg = cap_fg.read()
         ret_bg, frame_bg = cap_bg.read()
@@ -45,11 +60,14 @@ def process_video():
         sys.stdout.write(f"\rフレーム処理中: {frame_count} / {total_frames}")
         sys.stdout.flush()
 
+        # ★変更点: 指定したフレーム間隔(CHANGE_INTERVAL_FRAMES)で色を更新する
+        if frame_count % CHANGE_INTERVAL_FRAMES == 0:
+            random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
+
         frame_bg_resized = cv2.resize(frame_bg, (width, height))
-        random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
         
         lower_bound = np.clip(random_color_bgr - TOLERANCE, 0, 255)
-        upper_bound = np.clip(random_color_bgr + TOLERANCE, 0, 255)
+        upper_bound = np.clip(random_color_bgr + TOLERANCE, 255, 255)
 
         mask = cv2.inRange(frame_fg, lower_bound, upper_bound)
         mask_inv = cv2.bitwise_not(mask)
