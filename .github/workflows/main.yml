@@ -8,7 +8,7 @@ on:
         description: 'Chroma Key Tolerance (0-255)'
         required: true
         default: '50' # デフォルト値も文字列に変更
-        type: string  # ★変更点: number から string に変更
+        type: string
       color_effect:
         description: 'Color Effect'
         required: true
@@ -62,12 +62,18 @@ jobs:
             --color-effect ${{ github.event.inputs.color_effect }} \
             --afterimage-strength ${{ github.event.inputs.afterimage_strength }}
 
-      # 5. ffmpegを使ってMP4をMOVに変換
+      # 5. ★追加: ffmpegをインストール
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # 6. ffmpegを使ってMP4をMOVに変換
       - name: Convert MP4 to MOV
         run: |
           ffmpeg -i ${{ env.MP4_VIDEO_NAME }} ${{ env.FINAL_VIDEO_NAME }}
 
-      # 6. 完成した動画 (MOV) を main ブランチにコミット & プッシュ
+      # 7. 完成した動画 (MOV) を main ブランチにコミット & プッシュ
       - name: Commit and push final video
         run: |
           git config user.name "github-actions[bot]"
@@ -77,7 +83,7 @@ jobs:
           git commit -m "Add/Update final video as MOV (workflow run ${{ github.run_id }})" || echo "No changes to commit"
           git push
 
-      # 7. (オプション) アーティファクトとしてもアップロード
+      # 8. (オプション) アーティファクトとしてもアップロード
       - name: Upload final video as artifact
         uses: actions/upload-artifact@v4
         with:
