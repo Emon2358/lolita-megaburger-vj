@@ -1,19 +1,40 @@
-# .github/workflows/video_process_upload.yml
 name: Video Processing & Upload Workflow
 
 on:
-  workflow_dispatch: # 手動実行を許可
+  workflow_dispatch:
+    # 手動実行時の入力項目
+    inputs:
+      tolerance:
+        description: 'Chroma Key Tolerance (0-255)'
+        required: true
+        default: '50' # デフォルト値も文字列に変更
+        type: string  # ★変更点: number から string に変更
+      color_effect:
+        description: 'Color Effect'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - bright
+          - warm
+          - cool
+      afterimage_strength:
+        description: 'Afterimage Strength (0.0 to 1.0)'
+        required: true
+        default: '0.3'
+        type: string
 
 env:
-  # Pythonスクリプトが出力する最終的な動画のファイル名
-  FINAL_VIDEO_NAME: 'final_video.mp4'
+  MP4_VIDEO_NAME: 'final_video.mp4'
+  FINAL_VIDEO_NAME: 'final_video.mov'
 
 jobs:
   process_and_upload:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: write 
+      contents: write  
 
     steps:
       # 1. リポジトリをチェックアウト
@@ -28,25 +49,32 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 3. ★変更点: 必要なライブラリをインストール (datamosh-pyを削除)
+      # 3. 必要なライブラリをインストール
       - name: Install Python dependencies
         run: |
           pip install opencv-python numpy
 
-      # 4. random_chroma.py を実行して動画を処理
+      # 4. 入力値を使ってPythonスクリプトを実行 (MP4を出力)
       - name: Run video processing script
-        run: python random_chroma.py
+        run: |
+          python random_chroma.py \
+            --tolerance ${{ github.event.inputs.tolerance }} \
+            --color-effect ${{ github.event.inputs.color_effect }} \
+            --afterimage-strength ${{ github.event.inputs.afterimage_strength }}
 
-      # 5. ★変更点: データモッシュのステップを削除
+      # 5. ffmpegを使ってMP4をMOVに変換
+      - name: Convert MP4 to MOV
+        run: |
+          ffmpeg -i ${{ env.MP4_VIDEO_NAME }} ${{ env.FINAL_VIDEO_NAME }}
 
-      # 6. 完成した動画を main ブランチにコミット & プッシュ
+      # 6. 完成した動画 (MOV) を main ブランチにコミット & プッシュ
       - name: Commit and push final video
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull
           git add ${{ env.FINAL_VIDEO_NAME }}
-          git commit -m "Add/Update final video (workflow run ${{ github.run_id }})" || echo "No changes to commit"
+          git commit -m "Add/Update final video as MOV (workflow run ${{ github.run_id }})" || echo "No changes to commit"
           git push
 
       # 7. (オプション) アーティファクトとしてもアップロード
