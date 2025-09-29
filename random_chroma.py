@@ -13,10 +13,10 @@ INPUT_VIDEO_BG = 'video2.mp4'
 OUTPUT_VIDEO_RAW = 'final_video_raw.mp4'
 
 # カラー透過（チョーク）関連
-TOLERANCE = 10             # 色距離の閾値（小さいほど厳密に色を選ぶ）
-CHANGE_INTERVAL_FRAMES = 1       # カラーターゲットを何フレームごとに切り替えるか（1で毎フレーム）
-TRANSITION_FRAMES = 0            # カラーの補間フレーム数（0で瞬変、>0で滑らかに変化）
-BLUR_KERNEL = 1          # マスクのぼかしカーネル（奇数推奨。1にするとぼかし無し）
+TOLERANCE = 10               # 色距離の閾値（小さいほど厳密）
+CHANGE_INTERVAL_FRAMES = 1       # カラーターゲットを何フレームごとに切り替えるか（1=毎フレーム）
+TRANSITION_FRAMES = 0            # カラーの補間フレーム数（0=瞬変）
+BLUR_KERNEL = 1           # マスクのぼかしカーネル（奇数推奨）
 
 # 前景フレーム取り出しのプリロード制御
 PRELOAD_FRAME_LIMIT = 700
@@ -36,11 +36,13 @@ def loop_reset(cap):
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
 def safe_read_frame_at(cap, idx):
+    """cap のフレーム idx を安全に読み出す（シーク + read）"""
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
     return cap.read()
 
 def maybe_apply_light_glitch(img, intensity=0.3):
-    if intensity <= 0: return img
+    if intensity <= 0: 
+        return img
     out = img.copy()
     h, w = out.shape[:2]
     max_shift = int(6 * intensity)
@@ -68,6 +70,7 @@ def process_video():
         print(f"ERROR: cannot open background '{INPUT_VIDEO_BG}'")
         return
 
+    # 基準サイズは前景ビデオ（既存仕様どおり）
     width = int(cap_fg.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap_fg.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap_fg.get(cv2.CAP_PROP_FPS) or 30.0
@@ -93,6 +96,7 @@ def process_video():
             ret, f = cap_fg.read()
             if not ret:
                 break
+            # resize to output size if necessary
             if (f.shape[1], f.shape[0]) != (width, height):
                 f = cv2.resize(f, (width, height))
             fg_frames.append(f)
@@ -117,6 +121,10 @@ def process_video():
                 print("背景ビデオの読み込みに失敗しました。")
                 break
 
+        # --- 重要: 背景を基準サイズにリサイズ（ここで必ず合わせる） ---
+        if (frame_bg.shape[1], frame_bg.shape[0]) != (width, height):
+            frame_bg = cv2.resize(frame_bg, (width, height))
+
         frame_count += 1
         sys.stdout.write(f"\rProcessing frame {frame_count}")
         sys.stdout.flush()
@@ -134,14 +142,15 @@ def process_video():
                 idx = random.randrange(total_frames)
                 ret_fg, fg_frame = safe_read_frame_at(cap_fg, idx)
                 if not ret_fg:
-                    # fallback
+                    # fallback: try reading sequentially
                     ret_fg2, fg_frame = cap_fg.read()
                     if not ret_fg2:
                         fg_frame = frame_bg.copy()
+            # ensure same size as output
             if (fg_frame.shape[1], fg_frame.shape[0]) != (width, height):
                 fg_frame = cv2.resize(fg_frame, (width, height))
 
-        # ターゲットカラーの切り替え（瞬変または補間）
+        # ターゲットカラーの切り替え
         if frame_count % max(1, CHANGE_INTERVAL_FRAMES) == 0:
             target_color = rand_bgr().astype(np.float32)
             transition_progress = 0.0
@@ -151,7 +160,6 @@ def process_video():
             t = min(1.0, transition_progress)
             current_color = (1 - t) * current_color + t * target_color
         else:
-            # 瞬変時はここで current_color を target に揃える
             if TRANSITION_FRAMES == 0:
                 current_color = target_color.copy()
 
@@ -159,27 +167,38 @@ def process_video():
         f = fg_frame.astype(np.float32)
         c = current_color.reshape((1,1,3)).astype(np.float32)
         diff = f - c
-        # 色距離（Euclid）
         dist = np.linalg.norm(diff, axis=2).astype(np.float32)
         tol = max(1.0, float(TOLERANCE))
-        # mask: 1 -> 背景（透過）、0 -> 前景（残す）
         mask = 1.0 - (dist / tol)
         mask = np.clip(mask, 0.0, 1.0)
 
-        # ぼかしてソフトにする（BLUR_KERNELは奇数が望ましい）
+        # マスクをぼかす（カーネルは奇数にする）
         bk = int(BLUR_KERNEL)
         if bk % 2 == 0:
-            bk = bk+1 if bk>1 else 1
+            bk = bk + 1 if bk > 0 else 1
         if bk > 1:
             mask = cv2.GaussianBlur(mask, (bk, bk), 0)
 
         alpha_3 = mask[..., np.newaxis]  # shape (h,w,1) : 1 => background
 
-        # 軽いエフェクト（任意）
+        # optional light glitch on fg
         if AGGRESSIVENESS > 0 and random.random() < AGGRESSIVENESS:
             f = maybe_apply_light_glitch(f.astype(np.uint8), AGGRESSIVENESS).astype(np.float32)
 
         bg_f = frame_bg.astype(np.float32)
+
+        # 最後に形状の安全チェック（念のため）
+        if f.shape[:2] != bg_f.shape[:2] or alpha_3.shape[:2] != f.shape[:2]:
+            # ここには通常入らないはず。入った場合は両方リサイズして合わせる。
+            h, w = height, width
+            if f.shape[:2] != (h, w):
+                f = cv2.resize(f.astype(np.uint8), (w, h)).astype(np.float32)
+            if bg_f.shape[:2] != (h, w):
+                bg_f = cv2.resize(bg_f.astype(np.uint8), (w, h)).astype(np.float32)
+            if alpha_3.shape[:2] != (h, w):
+                # alpha を再生成（単一色透過しない最小マスク）
+                alpha_3 = np.zeros((h, w, 1), dtype=np.float32)
+
         # 合成: mask が 1 のとき背景優先、0 のとき前景優先
         final = f * (1.0 - alpha_3) + bg_f * alpha_3
         final = np.clip(final, 0, 255).astype(np.uint8)
