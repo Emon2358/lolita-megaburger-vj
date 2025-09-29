@@ -20,7 +20,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # 3. 複雑なフィルタ記述をスクリプトファイルに書き出す（最終構文版）
+      # 3. 複雑なフィルタ記述をスクリプトファイルに書き出す（最終・完全構文版）
       - name: Create filter_complex script
         run: |
           cat <<'EOF' > filter_script.txt
@@ -30,12 +30,12 @@ jobs:
           g='g(X,Y)':
           b='b(X,Y)':
           a='
-            st(0, 2*acos(-1)*t/10),
-            st(1, 128+127*sin(ld(0))),
-            st(2, 128+127*sin(ld(0) + 2*acos(-1)/3)),
-            st(3, 128+127*sin(ld(0) + 4*acos(-1)/3)),
-            st(4, sqrt(pow(r(X,Y)-ld(1),2)+pow(g(X,Y)-ld(2),2)+pow(b(X,Y)-ld(3),2))),
-            if(lt(ld(4),60),0,255)
+            st(0\, 2*acos(-1)*t/10),
+            st(1\, 128+127*sin(ld(0))),
+            st(2\, 128+127*sin(ld(0) + 2*acos(-1)/3)),
+            st(3\, 128+127*sin(ld(0) + 4*acos(-1)/3)),
+            st(4\, sqrt(pow(r(X\,Y)-ld(1)\,2)+pow(g(X\,Y)-ld(2)\,2)+pow(b(X\,Y)-ld(3)\,2))),
+            if(lt(ld(4)\,60)\,0\,255)
           '
           [fg];
           [0:v][fg]overlay[merged];
