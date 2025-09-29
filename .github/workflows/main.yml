@@ -1,59 +1,48 @@
-name: Process and Composite Videos
+name: Process and Combine Videos with Dynamic Glitch Effect
 
+# ワークフローを手動で実行できるようにするトリガー
 on:
   workflow_dispatch:
-    inputs:
-      base_video:
-        description: '基準にする動画ファイル名 (この動画の長さに合わせる)'
-        required: true
-        default: 'video1.mp4'
-      overlay_video:
-        description: '重ねる動画ファイル名 (速度が変更される)'
-        required: true
-        default: 'video2.mp4'
-      output_file:
-        description: '出力する動画ファイル名'
-        required: true
-        default: 'processed_video.mp4'
 
 jobs:
-  process:
+  build_video:
+    # 最新のUbuntu環境で実行
     runs-on: ubuntu-latest
-    
-    permissions:
-      contents: write
 
     steps:
+      # 1. リポジトリのコンテンツをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-      
-      - name: Install FFmpeg
+      # 2. FFmpegをインストール
+      - name: Setup FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install dependencies
+      # 3. 動画処理を実行（動的クロマキー合成 + データモッシュ風エフェクト）
+      - name: Process videos with FFmpeg
         run: |
-          pip install opencv-python-headless numpy
-      
-      # ★★★ 修正箇所: 4番目の引数(色の指定)を削除 ★★★
-      - name: Run video processing script
-        run: |
-          python process_videos.py "${{ github.event.inputs.base_video }}" "${{ github.event.inputs.overlay_video }}" "${{ github.event.inputs.output_file }}"
-
+          ffmpeg -i video2.mp4 -i video1.mp4 -filter_complex \
+          "[1:v]format=rgba, \
+          geq=r=r(X,Y):g=g(X,Y):b=b(X,Y):a='if( \
+          lt( \
+            sqrt( \
+              pow(r(X,Y)-(128+127*sin(2*PI*t/10)),2) + \
+              pow(g(X,Y)-(128+127*sin(2*PI*t/10+2*PI/3)),2) + \
+              pow(b(X,Y)-(128+127*sin(2*PI*t/10+4*PI/3)),2) \
+            ), 60 \
+          ), 0, 255 \
+          )'[fg]; \
+          [0:v][fg]overlay[merged]; \
+          [merged]tblend=all_mode=difference,framerate=15,format=yuv420p" \
+          -c:a copy output.mp4
+          
+      # 4. 処理した動画をリポジトリにプッシュ
       - name: Commit and push processed video
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add "${{ github.event.inputs.output_file }}"
-          if git diff --staged --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "feat: Add processed video ${{ github.event.inputs.output_file }}" -m "[skip ci]"
-            git push
-          fi
+          git add output.mp4
+          # ファイルに変更があった場合のみコミットとプッシュを実行
+          git diff --staged --quiet || (git commit -m "✨ Add dynamic glitched video" && git push)
