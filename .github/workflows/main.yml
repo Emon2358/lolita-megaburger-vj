@@ -1,6 +1,5 @@
 name: Process and Composite Videos
 
-# ワークフローを手動で実行できるようにする (workflow_dispatch)
 on:
   workflow_dispatch:
     inputs:
@@ -19,13 +18,12 @@ on:
       target_color:
         description: '単色化する色 (RGB形式, 例: "255,0,255")'
         required: true
-        default: '255,0,255' # デフォルトはマゼンタ
+        default: '192,192,192' # 銀色
 
 jobs:
   process:
     runs-on: ubuntu-latest
     
-    # ワークフローがリポジトリに書き込む権限を設定
     permissions:
       contents: write
 
@@ -40,10 +38,10 @@ jobs:
         with:
           python-version: '3.9'
 
-      # 3. 必要なライブラリをインストール
+      # 3. 必要なライブラリをインストール (★ここが重要★)
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install moviepy numpy
       
       # 4. Pythonスクリプトを実行して動画を処理
       - name: Run video processing script
@@ -56,7 +54,6 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add "${{ github.event.inputs.output_file }}"
-          # コミットが存在する場合のみコミット・プッシュする
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
