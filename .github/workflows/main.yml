@@ -1,55 +1,68 @@
-# .github/workflows/video_process_upload.yml
 name: Video Processing & Upload Workflow
 
 on:
-  workflow_dispatch: # 手動実行を許可
+  workflow_dispatch:
 
 env:
-  # Pythonスクリプトが出力する最終的な動画のファイル名
   FINAL_VIDEO_NAME: 'final_video.mp4'
 
 jobs:
   process_and_upload:
     runs-on: ubuntu-latest
-    
+
     permissions:
-      contents: write 
+      contents: write
 
     steps:
-      # 1. リポジトリをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. Python 3.x 環境をセットアップ
+      - name: Install system packages (ffmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      # 3. ★変更点: 必要なライブラリをインストール (datamosh-pyを削除)
       - name: Install Python dependencies
         run: |
-          pip install opencv-python numpy
+          python -m pip install --upgrade pip
+          pip install opencv-python-headless numpy
 
-      # 4. random_chroma.py を実行して動画を処理
+      - name: Show inputs
+        run: |
+          echo "Listing working directory"
+          ls -la
+
       - name: Run video processing script
-        run: python random_chroma.py
+        run: |
+          python random_chroma.py
 
-      # 5. ★変更点: データモッシュのステップを削除
+      - name: Show result info
+        run: |
+          if [ -f "${{ env.FINAL_VIDEO_NAME }}" ]; then
+            echo "Output file:"
+            ls -lh "${{ env.FINAL_VIDEO_NAME }}"
+            md5sum "${{ env.FINAL_VIDEO_NAME }}" || true
+          else
+            echo "No output file found"
+            exit 1
+          fi
 
-      # 6. 完成した動画を main ブランチにコミット & プッシュ
       - name: Commit and push final video
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull
-          git add ${{ env.FINAL_VIDEO_NAME }}
+          git pull --rebase || true
+          git add ${{ env.FINAL_VIDEO_NAME }} || true
           git commit -m "Add/Update final video (workflow run ${{ github.run_id }})" || echo "No changes to commit"
-          git push
+          git push || echo "Push failed"
 
-      # 7. (オプション) アーティファクトとしてもアップロード
       - name: Upload final video as artifact
         uses: actions/upload-artifact@v4
         with:
