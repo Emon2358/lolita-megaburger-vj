@@ -2,91 +2,54 @@
 name: Video Processing & Upload Workflow
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手動実行を許可
 
 env:
-  FINAL_VIDEO_NAME: 'final_video_100mb.mp4'
-  RAW_VIDEO_NAME: 'final_video_raw.mp4'
-  TARGET_BYTES: 100000000  # 100,000,000 bytes（約95.4 MiB）。必要に応じて 104857600 に変更
+  # Pythonスクリプトが出力する最終的な動画のファイル名
+  FINAL_VIDEO_NAME: 'final_video.mp4'
 
 jobs:
   process_and_upload:
     runs-on: ubuntu-latest
-
+    
     permissions:
-      contents: write
+      contents: write 
 
     steps:
+      # 1. リポジトリをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install system packages (ffmpeg)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
+      # 2. Python 3.x 環境をセットアップ
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
+      # 3. ★変更点: 必要なライブラリをインストール (datamosh-pyを削除)
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install opencv-python-headless numpy
+          pip install opencv-python numpy
 
-      - name: List files (debug)
-        run: ls -la
-
+      # 4. random_chroma.py を実行して動画を処理
       - name: Run video processing script
         run: python random_chroma.py
 
-      - name: Re-encode to ~100MB target (two-pass using ffmpeg)
-        run: |
-          RAW="${{ env.RAW_VIDEO_NAME }}"
-          TARGET="${{ env.FINAL_VIDEO_NAME }}"
-          TARGET_BYTES=${{ env.TARGET_BYTES }}
-          AUDIO_BITRATE=128000
+      # 5. ★変更点: データモッシュのステップを削除
 
-          if [ ! -f "$RAW" ]; then
-            echo "Raw video '$RAW' not found!"
-            ls -la
-            exit 1
-          fi
-
-          DURATION=$(ffprobe -v error -select_streams v:0 -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$RAW")
-          if [ -z "$DURATION" ]; then
-            echo "ffprobe failed to get duration"
-            exit 1
-          fi
-
-          # compute video bitrate in bits per second
-          VID_BITRATE=$(awk -v t=$TARGET_BYTES -v d=$DURATION -v a=$AUDIO_BITRATE 'BEGIN{b=int((t*8)/d - a); if(b<1000) b=1000; print b}')
-          echo "Duration: $DURATION s, target video bitrate: $VID_BITRATE bps"
-
-          # Optional: scale down for more margin (uncomment to enable)
-          # SCALE="-vf scale=1280:-2"
-          SCALE=""
-
-          # Two-pass encode
-          ffmpeg -y -i "$RAW" -c:v libx264 -b:v ${VID_BITRATE} -pass 1 -an -f mp4 /dev/null
-          ffmpeg -y -i "$RAW" -c:v libx264 -b:v ${VID_BITRATE} -pass 2 -c:a aac -b:a 128k $SCALE "$TARGET"
-
-          echo "Re-encode finished. Result:"
-          ls -lh "$TARGET" || true
-          md5sum "$TARGET" || true
-
+      # 6. 完成した動画を main ブランチにコミット & プッシュ
       - name: Commit and push final video
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase || true
-          git add ${{ env.FINAL_VIDEO_NAME }} || true
+          git pull
+          git add ${{ env.FINAL_VIDEO_NAME }}
           git commit -m "Add/Update final video (workflow run ${{ github.run_id }})" || echo "No changes to commit"
-          git push || echo "Push failed"
+          git push
 
+      # 7. (オプション) アーティファクトとしてもアップロード
       - name: Upload final video as artifact
         uses: actions/upload-artifact@v4
         with:
