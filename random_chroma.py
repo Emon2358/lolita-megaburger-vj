@@ -7,7 +7,8 @@ import sys
 # --- 設定項目 ---
 INPUT_VIDEO_FG = 'video1.mp4'
 INPUT_VIDEO_BG = 'video2.mp4'
-OUTPUT_VIDEO = 'output_random_color.mp4'
+# ★変更点: 出力ファイル名を最終成果物の名前に変更
+OUTPUT_VIDEO = 'final_video.mp4' 
 TOLERANCE = 30 
 # --- 設定はここまで ---
 
