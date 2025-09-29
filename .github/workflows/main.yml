@@ -1,36 +1,57 @@
 name: Process and Combine Videos with Dynamic Glitch Effect
 
+# ワークフローを手動で実行できるようにするトリガー
 on:
   workflow_dispatch:
 
 jobs:
   build_video:
+    # 最新のUbuntu環境で実行
     runs-on: ubuntu-latest
 
     steps:
+      # 1. リポジトリのコンテンツをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. FFmpegをインストール
       - name: Setup FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+
+      # 3. 複雑なフィルタ記述をスクリプトファイルに書き出す（最終・完全構文版）
       - name: Create filter_complex script
         run: |
           cat <<'EOF' > filter_script.txt
-          [1:v]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(sqrt(pow(r(X,Y)-128,2)+pow(g(X,Y)-128,2)+pow(b(X,Y)-128,2)),60),0,255)'[fg];
+          [1:v]format=rgba,
+          geq=
+          r='
+            st(0, 2*acos(-1)*t/10);
+            st(1, 128+127*sin(ld(0)));
+            st(2, 128+127*sin(ld(0) + 2*acos(-1)/3));
+            st(3, 128+127*sin(ld(0) + 4*acos(-1)/3));
+            st(4, sqrt(pow(r(X,Y)-ld(1),2)+pow(g(X,Y)-ld(2),2)+pow(b(X,Y)-ld(3),2)));
+            r(X,Y)
+          ':
+          g='g(X,Y)':
+          b='b(X,Y)':
+          a='if(lt(ld(4),60),0,255)'
+          [fg];
           [0:v][fg]overlay[merged];
           [merged]tblend=all_mode=difference,framerate=15,format=yuv420p
           EOF
 
-
+      # 4. スクリプトファイルを使って動画処理を実行
       - name: Process videos with FFmpeg using script
         run: |
-          ffmpeg -y -i video2.mp4 -i video1.mp4 -filter_complex_script filter_script.txt -c:v libx264 -preset veryfast -crf 23 -c:a copy output.mp4
-
+          ffmpeg -i video2.mp4 -i video1.mp4 -filter_complex_script filter_script.txt -c:a copy output.mp4
+          
+      # 5. 処理した動画をリポジトリにプッシュ
       - name: Commit and push processed video
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add output.mp4
+          # ファイルに変更があった場合のみコミットとプッシュを実行
           git diff --staged --quiet || (git commit -m "✨ Add dynamic glitched video" && git push)
