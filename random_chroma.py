@@ -13,10 +13,10 @@ INPUT_VIDEO_BG = 'video2.mp4'
 OUTPUT_VIDEO_RAW = 'final_video_raw.mp4'
 
 # カラー透過（チョーク）関連
-TOLERANCE = 10               # 色距離の閾値（小さいほど厳密）
-CHANGE_INTERVAL_FRAMES = 1       # カラーターゲットを何フレームごとに切り替えるか（1=毎フレーム）
+TOLERANCE =60            # 色距離の閾値（小さいほど厳密）
+CHANGE_INTERVAL_FRAMES = 20    # カラーターゲットを何フレームごとに切り替えるか（1=毎フレーム）
 TRANSITION_FRAMES = 0            # カラーの補間フレーム数（0=瞬変）
-BLUR_KERNEL = 1           # マスクのぼかしカーネル（奇数推奨）
+BLUR_KERNEL = 10     # マスクのぼかしカーネル（奇数推奨）
 
 # 前景フレーム取り出しのプリロード制御
 PRELOAD_FRAME_LIMIT = 700
