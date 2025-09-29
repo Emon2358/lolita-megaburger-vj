@@ -12,6 +12,7 @@ import numpy as np
 import random
 import time
 import os
+import sys
 
 # ---------- 設定 ----------
 INPUT_VIDEO_FG = 'video1.mp4'
