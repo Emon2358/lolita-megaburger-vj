@@ -9,7 +9,7 @@ import sys
 # 1. 範囲 (TOLERANCE)
 #    透過させる色の類似度。値を大きくするほど、より広い範囲の色が一気に透過します。
 #    推奨値: 30 (控えめ) ~ 100 (大胆)
-TOLERANCE = 60
+TOLERANCE = 100
 
 # 2. 頻度・速度 (CHANGE_INTERVAL_FRAMES)
 #    何フレームごとに透過する色をランダムに変えるか。
