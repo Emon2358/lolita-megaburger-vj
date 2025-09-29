@@ -67,7 +67,6 @@ def main():
 
     target_color_bgr = parse_color(color_str)
     
-    # --- 1. 動画情報の取得 ---
     print("動画情報を取得中...")
     base_info = get_video_info(base_video_path)
     overlay_info = get_video_info(overlay_video_path)
@@ -75,21 +74,16 @@ def main():
     base_duration = float(base_info['format']['duration'])
     overlay_duration = float(overlay_info['format']['duration'])
     
-    # --- 2. Overlay動画の速度を変更した一時ファイルを作成 ---
     print("重ねる動画の速度を調整中...")
     temp_overlay_path = "temp_overlay.mp4"
     speed_factor = overlay_duration / base_duration
-    # atempoフィルタは0.5-100.0の範囲のため、複数回適用する必要がある場合も考慮
-    # 簡単のため単純な計算で実装
     command = (f'ffmpeg -y -i "{overlay_video_path}" '
                f'-vf "setpts={1/speed_factor}*PTS" -af "atempo={speed_factor}" '
                f'"{temp_overlay_path}"')
     run_command(command)
 
-    # --- 3. OpenCVでフレームを処理し、FFmpegのパイプに流す ---
     print("フレームを1枚ずつ処理中...")
     
-    # 入力動画を開く
     cap_base = cv2.VideoCapture(base_video_path)
     cap_overlay = cv2.VideoCapture(temp_overlay_path)
     
@@ -97,23 +91,11 @@ def main():
     height = int(cap_base.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap_base.get(cv2.CAP_PROP_FPS)
 
-    # 音声付きで動画をエンコードするFFmpegプロセスを準備
     command = [
-        'ffmpeg',
-        '-y',
-        '-f', 'rawvideo',
-        '-vcodec', 'rawvideo',
-        '-s', f'{width}x{height}',
-        '-pix_fmt', 'bgr24',
-        '-r', str(fps),
-        '-i', '-',  # 標準入力から映像フレームを受け取る
-        '-i', base_video_path, # 基準動画から音声を抽出
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-map', '0:v:0', # 映像はパイプから
-        '-map', '1:a:0?',# 音声は基準動画から (音声が無くてもエラーにしない)
-        '-pix_fmt', 'yuv420p',
-        f'"{output_path}"'
+        'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
+        '-s', f'{width}x{height}', '-pix_fmt', 'bgr24', '-r', str(fps),
+        '-i', '-', '-i', base_video_path, '-c:v', 'libx24', '-c:a', 'aac',
+        '-map', '0:v:0', '-map', '1:a:0?', '-pix_fmt', 'yuv420p', f'"{output_path}"'
     ]
     
     process = subprocess.Popen(" ".join(command), stdin=subprocess.PIPE, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -125,18 +107,19 @@ def main():
         if not ret1 or not ret2:
             break
         
-        # エフェクト適用
         frame1_fx = glitch_and_monochrome(frame1, target_color_bgr)
         frame2_fx = glitch_and_monochrome(frame2, target_color_bgr)
         
-        # 合成 (単純な加重平均)
-        # 中央に配置するためにリサイズとパディングが必要だが、今回は単純な重ね合わせにする
-        final_frame = cv2.addWeighted(frame1_fx, 0.5, frame2_fx, 0.5, 0)
+        # ★★★ 修正箇所 ★★★
+        # frame2_fx を frame1_fx と同じサイズにリサイズします。
+        # これにより、異なる解像度の動画でもエラーなく合成できます。
+        resized_frame2_fx = cv2.resize(frame2_fx, (width, height))
         
-        # FFmpegプロセスに書き込み
+        # サイズを合わせたフレームで合成を実行します。
+        final_frame = cv2.addWeighted(frame1_fx, 0.5, resized_frame2_fx, 0.5, 0)
+        
         process.stdin.write(final_frame.tobytes())
 
-    # --- 4. クリーンアップ ---
     print("後処理を実行中...")
     cap_base.release()
     cap_overlay.release()
