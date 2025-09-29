@@ -7,22 +7,22 @@ on:
       tolerance:
         description: 'Chroma Key Tolerance (0-255)'
         required: true
-        default: '50' # デフォルト値も文字列に変更
+        default: '50'
         type: string
-      color_effect:
-        description: 'Color Effect'
-        required: true
-        default: 'none'
-        type: choice
-        options:
-          - none
-          - bright
-          - warm
-          - cool
       afterimage_strength:
         description: 'Afterimage Strength (0.0 to 1.0)'
         required: true
         default: '0.3'
+        type: string
+      overlay_color:
+        description: 'Overlay Color (hex, e.g., #FF5733 or none)'
+        required: true
+        default: 'none'
+        type: string
+      overlay_strength:
+        description: 'Overlay Strength (0.0 to 1.0)'
+        required: true
+        default: '0.4'
         type: string
 
 env:
@@ -54,15 +54,16 @@ jobs:
         run: |
           pip install opencv-python numpy
 
-      # 4. 入力値を使ってPythonスクリプトを実行 (MP4を出力)
+      # 4. 入力値を使ってPythonスクリプトを実行
       - name: Run video processing script
         run: |
           python random_chroma.py \
             --tolerance ${{ github.event.inputs.tolerance }} \
-            --color-effect ${{ github.event.inputs.color_effect }} \
-            --afterimage-strength ${{ github.event.inputs.afterimage_strength }}
+            --afterimage-strength ${{ github.event.inputs.afterimage_strength }} \
+            --overlay-color "${{ github.event.inputs.overlay_color }}" \
+            --overlay-strength ${{ github.event.inputs.overlay_strength }}
 
-      # 5. ★追加: ffmpegをインストール
+      # 5. ffmpegをインストール
       - name: Install ffmpeg
         run: |
           sudo apt-get update
