@@ -1,57 +1,75 @@
-name: Process and Combine Videos with Dynamic Glitch Effect
+# .github/workflows/full_video_workflow.yml
+name: Full Video Processing & Upload Workflow
 
-# ワークフローを手動で実行できるようにするトリガー
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手動実行を許可
+
+env:
+  # ★変更点: 完成した動画をプッシュするブランチを 'main' に設定
+  TARGET_BRANCH: 'main' 
+  
+  # 最終的な動画のファイル名
+  FINAL_VIDEO_NAME: 'final_datamoshed_video.mp4'
 
 jobs:
-  build_video:
-    # 最新のUbuntu環境で実行
+  process_and_upload:
     runs-on: ubuntu-latest
+    
+    # リポジトリへの書き込み権限を付与
+    permissions:
+      contents: write 
 
     steps:
-      # 1. リポジトリのコンテンツをチェックアウト
+      # 1. 現在のブランチ（main）のコンテンツをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
+        # GITHUB_TOKEN を使用してチェックアウトすることで、後でプッシュできるようになります
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. FFmpegをインストール
-      - name: Setup FFmpeg
+      # 2. Python 3.x 環境をセットアップ
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # 3. 必要なライブラリとツールをインストール
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+          pip install opencv-python numpy datamosh-py
 
-      # 3. 複雑なフィルタ記述をスクリプトファイルに書き出す（最終・完全構文版）
-      - name: Create filter_complex script
-        run: |
-          cat <<'EOF' > filter_script.txt
-          [1:v]format=rgba,
-          geq=
-          r='
-            st(0, 2*acos(-1)*t/10);
-            st(1, 128+127*sin(ld(0)));
-            st(2, 128+127*sin(ld(0) + 2*acos(-1)/3));
-            st(3, 128+127*sin(ld(0) + 4*acos(-1)/3));
-            st(4, sqrt(pow(r(X,Y)-ld(1),2)+pow(g(X,Y)-ld(2),2)+pow(b(X,Y)-ld(3),2)));
-            r(X,Y)
-          ':
-          g='g(X,Y)':
-          b='b(X,Y)':
-          a='if(lt(ld(4),60),0,255)'
-          [fg];
-          [0:v][fg]overlay[merged];
-          [merged]tblend=all_mode=difference,framerate=15,format=yuv420p
-          EOF
+      # 4. random_chroma.py を実行して動画を合成
+      - name: Run random chromakey script
+        run: python random_chroma.py
 
-      # 4. スクリプトファイルを使って動画処理を実行
-      - name: Process videos with FFmpeg using script
+      # 5. データモッシュを適用
+      - name: Apply datamosh
         run: |
-          ffmpeg -i video2.mp4 -i video1.mp4 -filter_complex_script filter_script.txt -c:a copy output.mp4
+          datamosh composited_video.mp4 -o ${{ env.FINAL_VIDEO_NAME }} --effect classic
+
+      # 6. 完成した動画を main ブランチにコミット & プッシュ
+      - name: Commit and push final video
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           
-      # 5. 処理した動画をリポジトリにプッシュ
-      - name: Commit and push processed video
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add output.mp4
-          # ファイルに変更があった場合のみコミットとプッシュを実行
-          git diff --staged --quiet || (git commit -m "✨ Add dynamic glitched video" && git push)
+          # ワークスペースを最新の状態に保つ
+          git pull
+          
+          # 新しい動画ファイルを追加
+          git add ${{ env.FINAL_VIDEO_NAME }}
+          
+          # 変更があればコミット、なければ何もしない
+          git commit -m "Add/Update final datamoshed video (workflow run ${{ github.run_id }})" || echo "No changes to commit"
+          
+          # main ブランチにプッシュ
+          git push
+
+      # 7. (オプション) アーティファクトとしてもアップロード
+      - name: Upload final video as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-datamoshed-video
+          path: ${{ env.FINAL_VIDEO_NAME }}
