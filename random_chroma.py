@@ -31,10 +31,7 @@ def process_video(args):
 
     print("動画処理を開始します...")
     
-    # ★変更点: ポスタリゼーション時間エフェクト用の変数を初期化
-    held_frame = None
-    frame_counter = 0
-    
+    frame_count = 0
     while True:
         ret_fg, frame_fg = cap_fg.read()
         ret_bg, frame_bg = cap_bg.read()
@@ -42,29 +39,44 @@ def process_video(args):
         if not ret_fg or not ret_bg:
             break
         
-        frame_counter += 1
-        sys.stdout.write(f"\rフレーム処理中: {frame_counter} / {total_frames}")
+        frame_count += 1
+        sys.stdout.write(f"\rフレーム処理中: {frame_count} / {total_frames}")
         sys.stdout.flush()
 
-        # ★変更点: 指定した間隔でフレームを更新するロジック
-        # (カウンター % 間隔 == 1) のタイミングで新しいフレームを処理
-        if (frame_counter % args.posterize_time_duration == 1) or held_frame is None:
-            frame_bg_resized = cv2.resize(frame_bg, (width, height))
-            random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
-            
-            # クロマキー処理
-            lower_bound = np.clip(random_color_bgr - args.tolerance, 0, 255)
-            upper_bound = np.clip(random_color_bgr + args.tolerance, 0, 255)
-            mask = cv2.inRange(frame_fg, lower_bound, upper_bound)
-            mask_inv = cv2.bitwise_not(mask)
-            fg_masked = cv2.bitwise_and(frame_fg, frame_fg, mask=mask_inv)
-            bg_masked = cv2.bitwise_and(frame_bg_resized, frame_bg_resized, mask=mask)
-            
-            # 処理したフレームを「保持」する
-            held_frame = cv2.add(fg_masked, bg_masked)
+        frame_bg_resized = cv2.resize(frame_bg, (width, height))
+        random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
+        
+        # クロマキー処理
+        lower_bound = np.clip(random_color_bgr - args.tolerance, 0, 255)
+        upper_bound = np.clip(random_color_bgr + args.tolerance, 0, 255)
+        mask = cv2.inRange(frame_fg, lower_bound, upper_bound)
+        mask_inv = cv2.bitwise_not(mask)
+        fg_masked = cv2.bitwise_and(frame_fg, frame_fg, mask=mask_inv)
+        bg_masked = cv2.bitwise_and(frame_bg_resized, frame_bg_resized, mask=mask)
+        chroma_frame = cv2.add(fg_masked, bg_masked)
 
-        # ★変更点: 次の更新タイミングまで、保持したフレームを書き出し続ける
-        out.write(held_frame)
+        output_frame = chroma_frame
+
+        # ★変更点: チャンネルシフトエフェクトを適用
+        if args.effect == 'channel_shift':
+            b, g, r = cv2.split(chroma_frame)
+            shift = args.shift_intensity
+            # 青と赤のチャンネルを逆方向にずらす
+            b = np.roll(b, shift, axis=1)
+            r = np.roll(r, -shift, axis=1)
+            # 再びチャンネルを結合
+            output_frame = cv2.merge([b, g, r])
+
+        # ★変更点: エッジ検出エフェクトを適用
+        elif args.effect == 'edge':
+            gray = cv2.cvtColor(chroma_frame, cv2.COLOR_BGR2GRAY)
+            # ラプラシアンフィルタでエッジを検出
+            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+            edges = cv2.convertScaleAbs(laplacian)
+            # ３チャンネルのカラー映像に戻す
+            output_frame = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+
+        out.write(output_frame)
 
     print(f"\n動画処理が完了しました。'{OUTPUT_VIDEO}' として保存されました。")
 
@@ -74,14 +86,11 @@ def process_video(args):
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    # ★変更点: 引数をポスタリゼーション時間エフェクト用に変更
-    parser = argparse.ArgumentParser(description='動画にクロマキーとポスタリゼーション時間エフェクトを適用します。')
+    # ★変更点: 引数を新しいエフェクト用に全面的に更新
+    parser = argparse.ArgumentParser(description='動画にクロマキーと激しい特殊エフェクトを適用します。')
     parser.add_argument('--tolerance', type=int, default=50, help='クロマキーの色の許容度 (0-255)')
-    parser.add_argument('--posterize-time-duration', type=int, default=3, help='1フレームを保持する長さ（大きいほどカクカクになる）')
+    parser.add_argument('--effect', type=str, default='none', choices=['none', 'channel_shift', 'edge'], help='適用する特殊エフェクト')
+    parser.add_argument('--shift-intensity', type=int, default=10, help='チャンネルシフトエフェクトの強さ（ずらすピクセル数）')
     
     args = parser.parse_args()
-    # 期間は1以上である必要があるためバリデーション
-    if args.posterize_time_duration < 1:
-        args.posterize_time_duration = 1
-        
     process_video(args)
