@@ -2,17 +2,25 @@ name: Video Processing & Upload Workflow
 
 on:
   workflow_dispatch:
-    # ★変更点: 入力項目をポスタリゼーション時間エフェクト用に変更
     inputs:
       tolerance:
         description: 'Chroma Key Tolerance (0-255)'
         required: true
         default: '50'
         type: string
-      posterize_time_duration:
-        description: 'Posterize Time Duration (e.g., 3)'
+      effect:
+        description: 'Special Effect to Apply'
         required: true
-        default: '3'
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - channel_shift
+          - edge
+      shift_intensity:
+        description: 'Intensity for Channel Shift effect (e.g., 10)'
+        required: true
+        default: '10'
         type: string
 
 env:
@@ -44,12 +52,13 @@ jobs:
         run: |
           pip install opencv-python numpy
 
-      # 4. ★変更点: スクリプト実行時の引数を修正
+      # 4. Pythonスクリプトを実行
       - name: Run video processing script
         run: |
           python random_chroma.py \
             --tolerance ${{ github.event.inputs.tolerance }} \
-            --posterize-time-duration ${{ github.event.inputs.posterize_time_duration }}
+            --effect ${{ github.event.inputs.effect }} \
+            --shift-intensity ${{ github.event.inputs.shift_intensity }}
 
       # 5. ffmpegをインストール
       - name: Install ffmpeg
