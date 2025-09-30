@@ -31,8 +31,10 @@ def process_video(args):
 
     print("動画処理を開始します...")
     
-    prev_frame = None
-    frame_count = 0
+    # ★変更点: ポスタリゼーション時間エフェクト用の変数を初期化
+    held_frame = None
+    frame_counter = 0
+    
     while True:
         ret_fg, frame_fg = cap_fg.read()
         ret_bg, frame_bg = cap_bg.read()
@@ -40,30 +42,29 @@ def process_video(args):
         if not ret_fg or not ret_bg:
             break
         
-        frame_count += 1
-        sys.stdout.write(f"\rフレーム処理中: {frame_count} / {total_frames}")
+        frame_counter += 1
+        sys.stdout.write(f"\rフレーム処理中: {frame_counter} / {total_frames}")
         sys.stdout.flush()
 
-        frame_bg_resized = cv2.resize(frame_bg, (width, height))
-        random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
-        
-        # クロマキー処理
-        lower_bound = np.clip(random_color_bgr - args.tolerance, 0, 255)
-        upper_bound = np.clip(random_color_bgr + args.tolerance, 0, 255)
-        mask = cv2.inRange(frame_fg, lower_bound, upper_bound)
-        mask_inv = cv2.bitwise_not(mask)
-        fg_masked = cv2.bitwise_and(frame_fg, frame_fg, mask=mask_inv)
-        bg_masked = cv2.bitwise_and(frame_bg_resized, frame_bg_resized, mask=mask)
-        chroma_frame = cv2.add(fg_masked, bg_masked)
+        # ★変更点: 指定した間隔でフレームを更新するロジック
+        # (カウンター % 間隔 == 1) のタイミングで新しいフレームを処理
+        if (frame_counter % args.posterize_time_duration == 1) or held_frame is None:
+            frame_bg_resized = cv2.resize(frame_bg, (width, height))
+            random_color_bgr = np.array([random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)])
+            
+            # クロマキー処理
+            lower_bound = np.clip(random_color_bgr - args.tolerance, 0, 255)
+            upper_bound = np.clip(random_color_bgr + args.tolerance, 0, 255)
+            mask = cv2.inRange(frame_fg, lower_bound, upper_bound)
+            mask_inv = cv2.bitwise_not(mask)
+            fg_masked = cv2.bitwise_and(frame_fg, frame_fg, mask=mask_inv)
+            bg_masked = cv2.bitwise_and(frame_bg_resized, frame_bg_resized, mask=mask)
+            
+            # 処理したフレームを「保持」する
+            held_frame = cv2.add(fg_masked, bg_masked)
 
-        # 残像効果のロジック
-        if prev_frame is None:
-            prev_frame = chroma_frame.copy()
-        
-        output_frame = cv2.addWeighted(chroma_frame, 1.0 - args.afterimage_strength, prev_frame, args.afterimage_strength, 0)
-        prev_frame = output_frame.copy()
-
-        out.write(output_frame)
+        # ★変更点: 次の更新タイミングまで、保持したフレームを書き出し続ける
+        out.write(held_frame)
 
     print(f"\n動画処理が完了しました。'{OUTPUT_VIDEO}' として保存されました。")
 
@@ -73,10 +74,14 @@ def process_video(args):
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    # ★変更点: 単色オーバーレイに関する引数を削除
-    parser = argparse.ArgumentParser(description='動画にクロマキーと残像効果を適用します。')
+    # ★変更点: 引数をポスタリゼーション時間エフェクト用に変更
+    parser = argparse.ArgumentParser(description='動画にクロマキーとポスタリゼーション時間エフェクトを適用します。')
     parser.add_argument('--tolerance', type=int, default=50, help='クロマキーの色の許容度 (0-255)')
-    parser.add_argument('--afterimage-strength', type=float, default=0.3, help='残像の強さ (0.0 - 1.0)')
+    parser.add_argument('--posterize-time-duration', type=int, default=3, help='1フレームを保持する長さ（大きいほどカクカクになる）')
     
     args = parser.parse_args()
+    # 期間は1以上である必要があるためバリデーション
+    if args.posterize_time_duration < 1:
+        args.posterize_time_duration = 1
+        
     process_video(args)
