@@ -52,7 +52,13 @@ jobs:
         run: |
           pip install opencv-python numpy
 
-      # 4. Pythonスクリプトを実行
+      # 4. 処理対象の動画をURLからダウンロード
+      - name: Download input videos
+        run: |
+          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/sm9875066.mp4 -O video1.mp4
+          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/sm39403653.mp4 -O video2.mp4
+
+      # 5. Pythonスクリプトを実行
       - name: Run video processing script
         run: |
           python random_chroma.py \
@@ -60,18 +66,18 @@ jobs:
             --effect ${{ github.event.inputs.effect }} \
             --shift-intensity ${{ github.event.inputs.shift_intensity }}
 
-      # 5. ffmpegをインストール
+      # 6. ffmpegをインストール
       - name: Install ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # 6. ffmpegを使ってMP4をMOVに変換
+      # 7. ffmpegを使ってMP4をMOVに変換
       - name: Convert MP4 to MOV
         run: |
           ffmpeg -i ${{ env.MP4_VIDEO_NAME }} ${{ env.FINAL_VIDEO_NAME }}
 
-      # 7. 完成した動画 (MOV) を main ブランチにコミット & プッシュ
+      # 8. 完成した動画 (MOV) を main ブランチにコミット & プッシュ
       - name: Commit and push final video
         run: |
           git config user.name "github-actions[bot]"
@@ -81,7 +87,7 @@ jobs:
           git commit -m "Add/Update final video as MOV (workflow run ${{ github.run_id }})" || echo "No changes to commit"
           git push
 
-      # 8. (オプション) アーティファクトとしてもアップロード
+      # 9. (オプション) アーティファクトとしてもアップロード
       - name: Upload final video as artifact
         uses: actions/upload-artifact@v4
         with:
