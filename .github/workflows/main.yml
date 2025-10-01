@@ -56,7 +56,7 @@ jobs:
       - name: Download input videos
         run: |
           wget https://github.com/Emon2358/4949downloader/raw/main/downloads/sm9940894.mp4 -O video1.mp4
-          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/sm3431060.mp4 -O video2.mp4
+          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/sm4943299.mp4 -O video2.mp4
 
       # 5. Pythonスクリプトを実行
       - name: Run video processing script
