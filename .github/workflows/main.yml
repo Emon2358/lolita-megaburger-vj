@@ -55,8 +55,8 @@ jobs:
       # 4. 処理対象の動画をURLからダウンロード
       - name: Download input videos
         run: |
-          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/ssstwitter.com_1759534847110.mp4 -O video1.mp4
-          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/sm6195873.mp4 -O video2.mp4
+          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/ssstwitter.com_1759535411922.mp4 -O video1.mp4
+          wget https://github.com/Emon2358/4949downloader/raw/main/downloads/sm6394260.mp4 -O video2.mp4
 
       # 5. Pythonスクリプトを実行
       - name: Run video processing script
